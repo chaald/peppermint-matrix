@@ -57,7 +57,7 @@ class MatrixFactorization(keras.Model):
         train_dataset_length = len(train_dataset)
         test_dataset_length = len(test_dataset) if test_dataset is not None else 0
         if shuffle:
-            train_dataset = train_dataset.shuffle(buffer_size=train_dataset_length)
+            train_dataset = train_dataset.shuffle(buffer_size=4*batch_size, reshuffle_each_iteration=True)
         if batch_size is not None and batch_size > 1:
             train_dataset = train_dataset.batch(batch_size)
         
@@ -97,9 +97,13 @@ class MatrixFactorization(keras.Model):
                     pbar.set_postfix({"loss": float(self.train_loss_tracker.result())})
             self.train_loss_history.append(float(self.train_loss_tracker.result()))
 
-            # # Validation Loop
-            # if test_dataset is not None:
-            #     self.evaluate(test_dataset, batch_size=batch_size)
+            # Test Loop
+            if test_dataset is not None:
+                self.evaluate(test_dataset, batch_size=batch_size)
+                pbar.set_postfix({
+                    "loss": float(self.train_loss_tracker.result()), 
+                    "test_loss": float(self.test_loss_tracker.result())
+                })
 
     def evaluate(
         self,
@@ -131,5 +135,3 @@ class MatrixFactorization(keras.Model):
             # update test loss
             self.test_loss_tracker.update_state(loss_value)
         self.test_loss_history.append(float(self.test_loss_tracker.result()))
-
-        return float(self.test_loss_tracker.result())
