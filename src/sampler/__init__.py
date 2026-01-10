@@ -5,7 +5,7 @@ from typing import Iterable, Dict
 
 class SimpleSampler:
     def __init__(self, item_set: Iterable[int], user_items: Dict[int, Iterable[int]]):
-        self.item_set = item_set
+        self.item_set = np.array(item_set) # stored as numpy array for efficient sampling
         self.user_items = user_items
 
     def sample(self, user_ids: Iterable[int]) -> tf.Tensor:

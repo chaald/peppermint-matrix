@@ -4,19 +4,36 @@ import keras
 from tqdm import tqdm
 
 from src.sampler import SimpleSampler
+from src.preprocessing import FeatureMeta
 from typing import Union, Iterable
 
 class MatrixFactorization(keras.Model):
-    def __init__(self, user_count: int, item_count: int, embedding_dimension_count: int, l1_regularization: float = 0.00, l2_regularization: float = 0.00):
+    def __init__(
+        self, 
+        features_meta: FeatureMeta,
+        embedding_dimension_count: int, 
+        l1_regularization: float = 0.0, 
+        l2_regularization: float = 0.0
+    ):
         super(MatrixFactorization, self).__init__()
+
+        # Lookup Layers
+        self.user_lookup_layer = keras.layers.IntegerLookup(
+            vocabulary=features_meta["user_id"]["vocabulary"],
+        )
+        self.item_lookup_layer = keras.layers.IntegerLookup(
+            vocabulary=features_meta["item_id"]["vocabulary"],
+        )
+
+        # Embedding Layers
         self.user_embedding_layer = keras.layers.Embedding(
-            input_dim=user_count,
+            input_dim=features_meta["user_id"]["unique_count"] + 1,
             output_dim=embedding_dimension_count,
             embeddings_initializer='uniform',
             embeddings_regularizer=keras.regularizers.l1_l2(l1=l1_regularization, l2=l2_regularization)
         )
         self.item_embedding_layer = keras.layers.Embedding(
-            input_dim=item_count,
+            input_dim=features_meta["item_id"]["unique_count"] + 1,
             output_dim=embedding_dimension_count,
             embeddings_initializer='uniform',
             embeddings_regularizer=keras.regularizers.l1_l2(l1=l1_regularization, l2=l2_regularization)
@@ -30,7 +47,6 @@ class MatrixFactorization(keras.Model):
         self.train_loss_history = []
         self.test_loss_history = []
 
-
     def compile(
         self, 
         optimizer: keras.optimizers.Optimizer,
@@ -43,10 +59,20 @@ class MatrixFactorization(keras.Model):
         self.sampler = sampler
 
     def call(self, user_ids: tf.Tensor, item_ids: tf.Tensor) -> tf.Tensor:
-        user_embedding = self.user_embedding_layer(user_ids)
-        item_embedding = self.item_embedding_layer(item_ids)
+        user_embedding = self.user_embedding(user_ids)
+        item_embedding = self.item_embedding(item_ids)
         predicted_interaction_probability = tf.reduce_sum(user_embedding * item_embedding, axis=1)
         return predicted_interaction_probability
+    
+    def user_embedding(self, user_ids: tf.Tensor) -> tf.Tensor:
+        user_indices = self.user_lookup_layer(user_ids)
+        user_embedding = self.user_embedding_layer(user_indices)
+        return user_embedding
+    
+    def item_embedding(self, item_ids: tf.Tensor) -> tf.Tensor:
+        item_indices = self.item_lookup_layer(item_ids)
+        item_embedding = self.item_embedding_layer(item_indices)
+        return item_embedding
     
     def calculate_loss(
         self,
@@ -105,9 +131,9 @@ class MatrixFactorization(keras.Model):
                     
                     # forward pass
                     with tf.GradientTape() as tape:
-                        user_embedding = self.user_embedding_layer(user_ids)
-                        item_embedding = self.item_embedding_layer(item_ids)
-                        negative_embedding = self.item_embedding_layer(random_negatives)
+                        user_embedding = self.user_embedding(user_ids)
+                        item_embedding = self.item_embedding(item_ids)
+                        negative_embedding = self.item_embedding(random_negatives)
 
                         loss_value = self.calculate_loss(
                             user_embeddings=user_embedding,
@@ -154,9 +180,9 @@ class MatrixFactorization(keras.Model):
             random_negatives = self.sampler.sample(user_ids)
 
             # forward pass
-            user_embedding = self.user_embedding_layer(user_ids)
-            item_embedding = self.item_embedding_layer(item_ids)
-            negative_embedding = self.item_embedding_layer(random_negatives)
+            user_embedding = self.user_embedding(user_ids)
+            item_embedding = self.item_embedding(item_ids)
+            negative_embedding = self.item_embedding(random_negatives)
 
             loss_value = self.calculate_loss(
                 user_embeddings=user_embedding,
