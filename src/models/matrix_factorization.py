@@ -4,6 +4,7 @@ import keras
 from tqdm import tqdm
 
 from src.sampler import SimpleSampler
+from typing import Union, Iterable
 
 class MatrixFactorization(keras.Model):
     def __init__(self, user_count: int, item_count: int, embedding_dimension_count: int, l1_regularization: float = 0.00, l2_regularization: float = 0.00):
@@ -33,10 +34,12 @@ class MatrixFactorization(keras.Model):
     def compile(
         self, 
         optimizer: keras.optimizers.Optimizer,
+        loss_functions: Union[keras.losses.Loss, Iterable[keras.losses.Loss]],
         sampler: SimpleSampler,
         **kwargs
     ):
         self.optimizer = optimizer
+        self.loss_functions = loss_functions
         self.sampler = sampler
 
     def call(self, user_ids: tf.Tensor, item_ids: tf.Tensor) -> tf.Tensor:
@@ -44,6 +47,24 @@ class MatrixFactorization(keras.Model):
         item_embedding = self.item_embedding_layer(item_ids)
         predicted_interaction_probability = tf.reduce_sum(user_embedding * item_embedding, axis=1)
         return predicted_interaction_probability
+    
+    def calculate_loss(
+        self,
+        user_embeddings: tf.Tensor,
+        positive_item_embeddings: tf.Tensor,
+        negative_item_embeddings: tf.Tensor
+    ) -> tf.Tensor:
+        loss_values = []
+        for loss_function in self.loss_functions:
+            loss_value = loss_function(
+                user_embeddings=user_embeddings,
+                positive_item_embeddings=positive_item_embeddings,
+                negative_item_embeddings=negative_item_embeddings
+            )
+            loss_values.append(loss_value)
+        total_loss = tf.reduce_sum(loss_values)
+
+        return total_loss
     
     def fit(
         self, 
@@ -54,6 +75,15 @@ class MatrixFactorization(keras.Model):
         batch_size: int = 16384,
         **kwargs
     ):
+        # Validation Check for Loss Functions
+        if not self.loss_functions:
+            raise ValueError("Loss functions must be provided before training. Please compile the model with appropriate loss functions.")
+        
+        # Validation Check for Optimizer
+        if not self.optimizer:
+            raise ValueError("Optimizer must be provided before training. Please compile the model with an appropriate optimizer.")
+
+        # Dataset Preparation
         train_dataset_length = len(train_dataset)
         test_dataset_length = len(test_dataset) if test_dataset is not None else 0
         if shuffle:
@@ -79,10 +109,11 @@ class MatrixFactorization(keras.Model):
                         item_embedding = self.item_embedding_layer(item_ids)
                         negative_embedding = self.item_embedding_layer(random_negatives)
 
-                        positive_prediction = tf.reduce_sum(user_embedding * item_embedding, axis=-1)
-                        negative_prediction = tf.reduce_sum(user_embedding * negative_embedding, axis=-1)
-
-                        loss_value = tf.reduce_mean(-tf.math.log(tf.sigmoid(positive_prediction - negative_prediction)))
+                        loss_value = self.calculate_loss(
+                            user_embeddings=user_embedding,
+                            positive_item_embeddings=item_embedding,
+                            negative_item_embeddings=negative_embedding
+                        )
 
                     # calculate gradient
                     user_gradient, item_gradient = tape.gradient(loss_value, self.user_embedding_layer.trainable_variables + self.item_embedding_layer.trainable_variables)
@@ -127,10 +158,11 @@ class MatrixFactorization(keras.Model):
             item_embedding = self.item_embedding_layer(item_ids)
             negative_embedding = self.item_embedding_layer(random_negatives)
 
-            positive_prediction = tf.reduce_sum(user_embedding * item_embedding, axis=-1)
-            negative_prediction = tf.reduce_sum(user_embedding * negative_embedding, axis=-1)
-
-            loss_value = tf.reduce_mean(-tf.math.log(tf.sigmoid(positive_prediction - negative_prediction)))
+            loss_value = self.calculate_loss(
+                user_embeddings=user_embedding,
+                positive_item_embeddings=item_embedding,
+                negative_item_embeddings=negative_embedding
+            )
 
             # update test loss
             self.test_loss_tracker.update_state(loss_value)
