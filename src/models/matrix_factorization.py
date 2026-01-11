@@ -3,11 +3,19 @@ import tensorflow as tf
 import keras
 from tqdm import tqdm
 
+from src.baremetal import gather_dense
 from src.sampler import SimpleSampler
 from src.preprocessing import FeatureMeta
 from typing import Union, Iterable
 
 class MatrixFactorization(keras.Model):
+    """
+    Matrix Factorization Model for Recommendation Systems with minimal assumptions.
+    We implement several features to ensure the model works on wide variety of datasets:
+    - User and Item Lookup Layers to handle arbitrary user and item IDs.
+    
+    """
+
     def __init__(
         self, 
         features_meta: FeatureMeta,
@@ -41,10 +49,16 @@ class MatrixFactorization(keras.Model):
 
         # Loss & Metrics Tracker
         self.train_loss_tracker = keras.metrics.Mean(name="train_loss")
+        self.train_hit_rate_tracker = keras.metrics.Mean(name="train_hit_rate")
+        self.train_recall_tracker = keras.metrics.Mean(name="train_recall")
+        self.train_precision_tracker = keras.metrics.Mean(name="train_precision")
         self.test_loss_tracker = keras.metrics.Mean(name="test_loss")
 
         # Loss & Metrics History
         self.train_loss_history = []
+        self.train_hit_rate_history = []
+        self.train_recall_history = []
+        self.train_precision_history = []
         self.test_loss_history = []
 
     def compile(
@@ -116,9 +130,12 @@ class MatrixFactorization(keras.Model):
             train_dataset = train_dataset.shuffle(buffer_size=4*batch_size, reshuffle_each_iteration=True)
         if batch_size is not None and batch_size > 1:
             train_dataset = train_dataset.batch(batch_size)
+            test_dataset = test_dataset.batch(batch_size) if test_dataset is not None else None
         
         for epoch in range(nepochs):
             self.reset_metrics()
+            self.train_interaction_history = []
+            self.test_interaction_history = []
 
             # Training Loop
             with tqdm(total=train_dataset_length, ncols=100, desc=f"[{epoch+1}/{nepochs}]") as pbar:
@@ -150,15 +167,93 @@ class MatrixFactorization(keras.Model):
                     # update training loss
                     self.train_loss_tracker.update_state(loss_value)
 
+                    # record interaction history
+                    user_indices = self.user_lookup_layer(user_ids)
+                    item_indices = self.item_lookup_layer(item_ids)
+                    self.train_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
+
                     pbar.update(len(user_ids))
-                    pbar.set_postfix({"loss": float(self.train_loss_tracker.result())})
-            self.train_loss_history.append(float(self.train_loss_tracker.result()))
+                    pbar.set_postfix({
+                        "loss": float(self.train_loss_tracker.result())
+                    })
+
+                # finalize training interaction history and loss
+                self.train_interaction_history = tf.concat(self.train_interaction_history, axis=0)
+                self.train_loss_history.append(float(self.train_loss_tracker.result()))
+                
+            # Training Offline Evaluation
+            train_interaction_matrix = self.construct_interaction_matrix(self.train_interaction_history)
+            user_candidates = tf.range(self.user_lookup_layer.vocabulary_size(), dtype=tf.int64)
+            item_candidates = tf.range(self.item_lookup_layer.vocabulary_size(), dtype=tf.int64)
+            user_dataset = tf.data.Dataset.from_tensor_slices(user_candidates)
+            user_dataset = user_dataset.batch(128)
+
+            k = 10
+            with tqdm(total=self.user_lookup_layer.vocabulary_size(), ncols=100, desc=f"[{epoch+1}/{nepochs}]") as pbar:
+                for step, user_batch in enumerate(user_dataset):
+                    user_embedding = self.user_embedding(user_batch)
+                    candidate_item_embedding = self.item_embedding(item_candidates)
+                    predicted_scores = tf.matmul(user_embedding, tf.transpose(candidate_item_embedding))
+                    predicted_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item
+
+                    user_indices
+                    ground_truth_interaction_matrix = gather_dense(train_interaction_matrix, user_batch)
+
+                    true_positives = tf.cast((predicted_rankings <= k) * ground_truth_interaction_matrix, tf.int32)
+                    true_positive_count = tf.reduce_sum(true_positives, axis=-1) # true_positives per user
+                    actual_positive_count = tf.reduce_sum(ground_truth_interaction_matrix, axis=-1) # actual positives per user
+
+                    # update metrics
+                    hit_rate = tf.cast(true_positive_count > 0, tf.float32)
+                    recall = tf.math.divide_no_nan(true_positive_count, actual_positive_count)
+                    precision = tf.math.divide_no_nan(true_positive_count, k)
+
+                    self.train_hit_rate_tracker.update_state(hit_rate)
+                    self.train_recall_tracker.update_state(recall)
+                    self.train_precision_tracker.update_state(precision)
+                    pbar.update(len(user_batch))
+
+            # finalize training metrics
+            self.train_hit_rate_history.append(float(self.train_hit_rate_tracker.result()))
+            self.train_recall_history.append(float(self.train_recall_tracker.result()))
+            self.train_precision_history.append(float(self.train_precision_tracker.result()))
+            pbar.set_postfix({
+                "recall": float(self.train_recall_tracker.result())
+            })
 
             # Test Loop
             if test_dataset is not None:
-                self.evaluate(test_dataset, batch_size=batch_size)
+                for step, evaluation_batch in enumerate(test_dataset):
+                    user_ids = evaluation_batch["user_id"]
+                    item_ids = evaluation_batch["item_id"]
+
+                    # random negative sample
+                    random_negatives = self.sampler.sample(user_ids)
+
+                    # forward pass
+                    user_embedding = self.user_embedding(user_ids)
+                    item_embedding = self.item_embedding(item_ids)
+                    negative_embedding = self.item_embedding(random_negatives)
+
+                    loss_value = self.calculate_loss(
+                        user_embeddings=user_embedding,
+                        positive_item_embeddings=item_embedding,
+                        negative_item_embeddings=negative_embedding
+                    )
+
+                    # update test loss
+                    self.test_loss_tracker.update_state(loss_value)
+
+                    # record interaction history
+                    user_indices = self.user_lookup_layer(user_ids)
+                    item_indices = self.item_lookup_layer(item_ids)
+                    self.test_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
+                
+                # finalize test interaction history and loss
+                self.test_interaction_history = tf.concat(self.test_interaction_history, axis=0)
+                self.test_loss_history.append(float(self.test_loss_tracker.result()))
+
                 pbar.set_postfix({
-                    "loss": float(self.train_loss_tracker.result()), 
                     "test_loss": float(self.test_loss_tracker.result())
                 })
 
@@ -168,28 +263,22 @@ class MatrixFactorization(keras.Model):
         batch_size: int = 16384,
         **kwargs
     ):
-        dataset_length = len(dataset)
         if batch_size is not None and batch_size > 1:
             dataset = dataset.batch(batch_size)
-        
+
         for step, evaluation_batch in enumerate(dataset):
-            user_ids = evaluation_batch["user_id"]
-            item_ids = evaluation_batch["item_id"]
+            break
 
-            # random negative sample
-            random_negatives = self.sampler.sample(user_ids)
+    def construct_interaction_matrix(
+        self,
+        interaction_history: tf.Tensor,
+    ) -> tf.sparse.SparseTensor:
+        interaction_matrix = tf.sparse.SparseTensor(
+            indices=interaction_history,
+            values=tf.ones(shape=(len(interaction_history),), dtype=tf.int32),
+            dense_shape=(self.user_lookup_layer.vocabulary_size(), self.item_lookup_layer.vocabulary_size())
+        )
 
-            # forward pass
-            user_embedding = self.user_embedding(user_ids)
-            item_embedding = self.item_embedding(item_ids)
-            negative_embedding = self.item_embedding(random_negatives)
-
-            loss_value = self.calculate_loss(
-                user_embeddings=user_embedding,
-                positive_item_embeddings=item_embedding,
-                negative_item_embeddings=negative_embedding
-            )
-
-            # update test loss
-            self.test_loss_tracker.update_state(loss_value)
-        self.test_loss_history.append(float(self.test_loss_tracker.result()))
+        return tf.sparse.reorder(interaction_matrix)
+            
+        
