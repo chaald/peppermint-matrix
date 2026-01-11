@@ -183,21 +183,21 @@ class MatrixFactorization(keras.Model):
                 
             # Training Offline Evaluation
             train_interaction_matrix = self.construct_interaction_matrix(self.train_interaction_history)
-            user_candidates = tf.range(self.user_lookup_layer.vocabulary_size(), dtype=tf.int64)
-            item_candidates = tf.range(self.item_lookup_layer.vocabulary_size(), dtype=tf.int64)
+            user_candidates = tf.constant(self.user_lookup_layer.get_vocabulary()[1:], dtype=tf.int64)
+            item_candidates = tf.constant(self.item_lookup_layer.get_vocabulary(), dtype=tf.int64)
             user_dataset = tf.data.Dataset.from_tensor_slices(user_candidates)
             user_dataset = user_dataset.batch(128)
 
             k = 10
-            with tqdm(total=self.user_lookup_layer.vocabulary_size(), ncols=100, desc=f"[{epoch+1}/{nepochs}]") as pbar:
+            with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=100, desc=f"[{epoch+1}/{nepochs}]") as pbar:
                 for step, user_batch in enumerate(user_dataset):
                     user_embedding = self.user_embedding(user_batch)
                     candidate_item_embedding = self.item_embedding(item_candidates)
                     predicted_scores = tf.matmul(user_embedding, tf.transpose(candidate_item_embedding))
                     predicted_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item
 
-                    user_indices
-                    ground_truth_interaction_matrix = gather_dense(train_interaction_matrix, user_batch)
+                    user_indices = self.user_lookup_layer(user_batch)
+                    ground_truth_interaction_matrix = gather_dense(train_interaction_matrix, user_indices)
 
                     true_positives = tf.cast((predicted_rankings <= k) * ground_truth_interaction_matrix, tf.int32)
                     true_positive_count = tf.reduce_sum(true_positives, axis=-1) # true_positives per user
