@@ -234,12 +234,14 @@ class MatrixFactorization(keras.Model):
                     user_embedding = self.user_embedding(user_batch)
                     candidate_item_embedding = self.item_embedding(item_candidates)
                     predicted_scores = tf.matmul(user_embedding, tf.transpose(candidate_item_embedding))
-                    predicted_train_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item
+                    # predicted_train_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item | nlog(n)
+                    _, predicted_train_topk_indices = tf.math.top_k(predicted_scores, k=k) # partition + partial sort gives you faster result  | n + klog(k)
 
                     # Train Metrics
                     train_ground_truth = gather_dense(train_interaction_matrix, user_indices)
-                    train_true_positives = tf.cast((predicted_train_rankings <= k) * train_ground_truth, tf.int32)
-                    train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true_positives per user
+                    # train_true_positives = tf.cast((predicted_train_rankings <= k) * train_ground_truth, tf.int32)
+                    # train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true_positives per user
+                    train_true_positive_count = tf.reduce_sum(tf.gather(train_ground_truth, predicted_train_topk_indices, batch_dims=-1), axis=-1) # this is equivalent to the commented lines above, and operation followed by sum reduce
                     train_actual_positive_count = tf.reduce_sum(train_ground_truth, axis=-1) # actual positives per user
 
                     train_hit = tf.cast(train_true_positive_count > 0, tf.float32)
@@ -254,11 +256,13 @@ class MatrixFactorization(keras.Model):
                     if test_dataset is not None:
                         # mask train interactions
                         ranking_mask = tf.where(train_ground_truth==1, float('inf'), 0.0)
-                        predicted_test_rankings = tf.argsort(tf.argsort((predicted_scores - ranking_mask), direction='DESCENDING', axis=-1), axis=-1) + 1
+                        # predicted_test_rankings = tf.argsort(tf.argsort((predicted_scores - ranking_mask), direction='DESCENDING', axis=-1), axis=-1) + 1
+                        _, predicted_test_topk_indices = tf.math.top_k(predicted_scores - ranking_mask, k=k)
 
                         test_ground_truth = gather_dense(test_interaction_matrix, user_indices)
-                        test_true_positives = tf.cast((predicted_test_rankings <= k) * test_ground_truth, tf.int32)
-                        test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true_positives per user
+                        # test_true_positives = tf.cast((predicted_test_rankings <= k) * test_ground_truth, tf.int32)
+                        # test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true_positives per user
+                        test_true_positive_count = tf.reduce_sum(tf.gather(test_ground_truth, predicted_test_topk_indices, batch_dims=-1), axis=-1)
                         test_actual_positive_count = tf.reduce_sum(test_ground_truth, axis=-1) # actual positives per user
 
                         test_hit = tf.cast(test_true_positive_count > 0, tf.float32)
