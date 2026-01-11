@@ -53,6 +53,9 @@ class MatrixFactorization(keras.Model):
         self.train_recall_tracker = keras.metrics.Mean(name="train_recall")
         self.train_precision_tracker = keras.metrics.Mean(name="train_precision")
         self.test_loss_tracker = keras.metrics.Mean(name="test_loss")
+        self.test_hit_rate_tracker = keras.metrics.Mean(name="test_hit_rate")
+        self.test_recall_tracker = keras.metrics.Mean(name="test_recall")
+        self.test_precision_tracker = keras.metrics.Mean(name="test_precision")
 
         # Loss & Metrics History
         self.train_loss_history = []
@@ -60,6 +63,9 @@ class MatrixFactorization(keras.Model):
         self.train_recall_history = []
         self.train_precision_history = []
         self.test_loss_history = []
+        self.test_hit_rate_history = []
+        self.test_recall_history = []
+        self.test_precision_history = []
 
     def compile(
         self, 
@@ -138,7 +144,7 @@ class MatrixFactorization(keras.Model):
             self.test_interaction_history = []
 
             # Training Loop
-            with tqdm(total=train_dataset_length, ncols=100, desc=f"[{epoch+1}/{nepochs}]") as pbar:
+            with tqdm(total=train_dataset_length, ncols=100, desc=f"TL [{epoch+1}/{nepochs}]") as pbar:
                 for step, training_batch in enumerate(train_dataset):
                     user_ids = training_batch["user_id"]
                     item_ids = training_batch["item_id"]
@@ -189,7 +195,7 @@ class MatrixFactorization(keras.Model):
             user_dataset = user_dataset.batch(128)
 
             k = 10
-            with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=100, desc=f"[{epoch+1}/{nepochs}]") as pbar:
+            with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=100, desc=f"TE [{epoch+1}/{nepochs}]") as pbar:
                 for step, user_batch in enumerate(user_dataset):
                     user_embedding = self.user_embedding(user_batch)
                     candidate_item_embedding = self.item_embedding(item_candidates)
@@ -211,15 +217,16 @@ class MatrixFactorization(keras.Model):
                     self.train_hit_rate_tracker.update_state(hit_rate)
                     self.train_recall_tracker.update_state(recall)
                     self.train_precision_tracker.update_state(precision)
+                    
                     pbar.update(len(user_batch))
+                    pbar.set_postfix({
+                        "recall": float(self.train_recall_tracker.result())
+                    })
 
             # finalize training metrics
             self.train_hit_rate_history.append(float(self.train_hit_rate_tracker.result()))
             self.train_recall_history.append(float(self.train_recall_tracker.result()))
             self.train_precision_history.append(float(self.train_precision_tracker.result()))
-            pbar.set_postfix({
-                "recall": float(self.train_recall_tracker.result())
-            })
 
             # Test Loop
             if test_dataset is not None:
@@ -253,9 +260,45 @@ class MatrixFactorization(keras.Model):
                 self.test_interaction_history = tf.concat(self.test_interaction_history, axis=0)
                 self.test_loss_history.append(float(self.test_loss_tracker.result()))
 
-                pbar.set_postfix({
-                    "test_loss": float(self.test_loss_tracker.result())
-                })
+                # Test Offline Evaluation
+                test_interaction_matrix = self.construct_interaction_matrix(self.test_interaction_history)
+                user_candidates = tf.constant(self.user_lookup_layer.get_vocabulary()[1:], dtype=tf.int64)
+                item_candidates = tf.constant(self.item_lookup_layer.get_vocabulary(), dtype=tf.int64)
+                user_dataset = tf.data.Dataset.from_tensor_slices(user_candidates)
+                user_dataset = user_dataset.batch(128)
+
+                k = 10
+                with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=100, desc=f"EE [{epoch+1}/{nepochs}]") as pbar:
+                    for step, user_batch in enumerate(user_dataset):
+                        user_embedding = self.user_embedding(user_batch)
+                        candidate_item_embedding = self.item_embedding(item_candidates)
+                        predicted_scores = tf.matmul(user_embedding, tf.transpose(candidate_item_embedding))
+                        predicted_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item
+
+                        user_indices = self.user_lookup_layer(user_batch)
+                        ground_truth_interaction_matrix = gather_dense(test_interaction_matrix, user_indices)
+                        true_positives = tf.cast((predicted_rankings <= k) * ground_truth_interaction_matrix, tf.int32)
+                        true_positive_count = tf.reduce_sum(true_positives, axis=-1) # true_positives per user
+                        actual_positive_count = tf.reduce_sum(ground_truth_interaction_matrix, axis=-1) # actual positives per user
+
+                        # update metrics
+                        hit_rate = tf.cast(true_positive_count > 0, tf.float32)
+                        recall = tf.math.divide_no_nan(true_positive_count, actual_positive_count)
+                        precision = tf.math.divide_no_nan(true_positive_count, k)
+
+                        self.test_hit_rate_tracker.update_state(hit_rate)
+                        self.test_recall_tracker.update_state(recall)
+                        self.test_precision_tracker.update_state(precision)
+                        pbar.update(len(user_batch))
+                
+                # finalize test metrics
+                self.test_hit_rate_history.append(float(self.test_hit_rate_tracker.result()))
+                self.test_recall_history.append(float(self.test_recall_tracker.result()))
+                self.test_precision_history.append(float(self.test_precision_tracker.result()))
+            
+
+
+
 
     def evaluate(
         self,
