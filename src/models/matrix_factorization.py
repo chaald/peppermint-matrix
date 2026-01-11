@@ -189,112 +189,114 @@ class MatrixFactorization(keras.Model):
             
             # Test Loop
             if test_dataset is not None:
-                for step, evaluation_batch in enumerate(test_dataset):
-                    user_ids = evaluation_batch["user_id"]
-                    item_ids = evaluation_batch["item_id"]
-
-                    # random negative sample
-                    random_negatives = self.sampler.sample(user_ids)
-
-                    # forward pass
-                    user_embedding = self.user_embedding(user_ids)
-                    item_embedding = self.item_embedding(item_ids)
-                    negative_embedding = self.item_embedding(random_negatives)
-
-                    loss_value = self.calculate_loss(
-                        user_embeddings=user_embedding,
-                        positive_item_embeddings=item_embedding,
-                        negative_item_embeddings=negative_embedding
-                    )
-
-                    # update test loss
-                    self.test_loss_tracker.update_state(loss_value)
-
-                    # record interaction history
-                    user_indices = self.user_lookup_layer(user_ids)
-                    item_indices = self.item_lookup_layer(item_ids)
-                    self.test_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
-                
-                # finalize test interaction history and loss
-                self.test_interaction_history = tf.concat(self.test_interaction_history, axis=0)
-                self.test_loss_history.append(float(self.test_loss_tracker.result()))
+                test_loss = self.compute_test_loss(test_dataset)
+                self.test_loss_history.append(test_loss)
 
             # Offline Evaluation
-            train_interaction_matrix = self.construct_interaction_matrix(self.train_interaction_history)
-            if test_dataset is not None: test_interaction_matrix = self.construct_interaction_matrix(self.test_interaction_history)
-            user_candidates = tf.constant(self.user_lookup_layer.get_vocabulary()[1:], dtype=tf.int64)
-            item_candidates = tf.constant(self.item_lookup_layer.get_vocabulary(), dtype=tf.int64)
-            user_dataset = tf.data.Dataset.from_tensor_slices(user_candidates)
-            user_dataset = user_dataset.batch(128)
+            self.evaluate(
+                describe=f"OE [{epoch+1}/{nepochs}]"
+            )
+    
+    def compute_test_loss(self, test_dataset: tf.data.Dataset):
+        for step, evaluation_batch in enumerate(test_dataset):
+            user_ids = evaluation_batch["user_id"]
+            item_ids = evaluation_batch["item_id"]
 
-            k = 10
-            with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=100, desc=f"EE [{epoch+1}/{nepochs}]") as pbar:
-                for step, user_batch in enumerate(user_dataset):
-                    user_indices = self.user_lookup_layer(user_batch)
-                    user_embedding = self.user_embedding(user_batch)
-                    candidate_item_embedding = self.item_embedding(item_candidates)
-                    predicted_scores = tf.matmul(user_embedding, tf.transpose(candidate_item_embedding))
-                    # predicted_train_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item | nlog(n)
-                    _, predicted_train_topk_indices = tf.math.top_k(predicted_scores, k=k) # partition + partial sort gives you faster result  | n + klog(k)
+            # random negative sample
+            random_negatives = self.sampler.sample(user_ids)
 
-                    # Train Metrics
-                    train_ground_truth = gather_dense(train_interaction_matrix, user_indices)
-                    # train_true_positives = tf.cast((predicted_train_rankings <= k) * train_ground_truth, tf.int32)
-                    # train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true_positives per user
-                    train_true_positive_count = tf.reduce_sum(tf.gather(train_ground_truth, predicted_train_topk_indices, batch_dims=-1), axis=-1) # this is equivalent to the commented lines above, and operation followed by sum reduce
-                    train_actual_positive_count = tf.reduce_sum(train_ground_truth, axis=-1) # actual positives per user
+            # forward pass
+            user_embedding = self.user_embedding(user_ids)
+            item_embedding = self.item_embedding(item_ids)
+            negative_embedding = self.item_embedding(random_negatives)
 
-                    train_hit = tf.cast(train_true_positive_count > 0, tf.float32)
-                    train_recall = tf.math.divide_no_nan(train_true_positive_count, train_actual_positive_count)
-                    train_precision = tf.math.divide_no_nan(train_true_positive_count, k)
+            loss_value = self.calculate_loss(
+                user_embeddings=user_embedding,
+                positive_item_embeddings=item_embedding,
+                negative_item_embeddings=negative_embedding
+            )
 
-                    self.train_hit_rate_tracker.update_state(train_hit)
-                    self.train_recall_tracker.update_state(train_recall)
-                    self.train_precision_tracker.update_state(train_precision)
+            # update test loss
+            self.test_loss_tracker.update_state(loss_value)
 
-                    # Test Metrics
-                    if test_dataset is not None:
-                        # mask train interactions
-                        ranking_mask = tf.where(train_ground_truth==1, float('inf'), 0.0)
-                        # predicted_test_rankings = tf.argsort(tf.argsort((predicted_scores - ranking_mask), direction='DESCENDING', axis=-1), axis=-1) + 1
-                        _, predicted_test_topk_indices = tf.math.top_k(predicted_scores - ranking_mask, k=k)
+            # record interaction history
+            user_indices = self.user_lookup_layer(user_ids)
+            item_indices = self.item_lookup_layer(item_ids)
+            self.test_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
+        
+        # finalize test interaction history and loss
+        self.test_interaction_history = tf.concat(self.test_interaction_history, axis=0)
 
-                        test_ground_truth = gather_dense(test_interaction_matrix, user_indices)
-                        # test_true_positives = tf.cast((predicted_test_rankings <= k) * test_ground_truth, tf.int32)
-                        # test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true_positives per user
-                        test_true_positive_count = tf.reduce_sum(tf.gather(test_ground_truth, predicted_test_topk_indices, batch_dims=-1), axis=-1)
-                        test_actual_positive_count = tf.reduce_sum(test_ground_truth, axis=-1) # actual positives per user
-
-                        test_hit = tf.cast(test_true_positive_count > 0, tf.float32)
-                        test_recall = tf.math.divide_no_nan(test_true_positive_count, test_actual_positive_count)
-                        test_precision = tf.math.divide_no_nan(test_true_positive_count, k)
-
-                        self.test_hit_rate_tracker.update_state(test_hit)
-                        self.test_recall_tracker.update_state(test_recall)
-                        self.test_precision_tracker.update_state(test_precision)
+        return float(self.test_loss_tracker.result())
             
-                    pbar.update(len(user_batch))
-
-            # finalize metrics
-            self.train_hit_rate_history.append(float(self.train_hit_rate_tracker.result()))
-            self.train_recall_history.append(float(self.train_recall_tracker.result()))
-            self.train_precision_history.append(float(self.train_precision_tracker.result()))
-            if test_dataset is not None:
-                self.test_hit_rate_history.append(float(self.test_hit_rate_tracker.result()))
-                self.test_recall_history.append(float(self.test_recall_tracker.result()))
-                self.test_precision_history.append(float(self.test_precision_tracker.result()))
-
     def evaluate(
         self,
-        dataset: tf.data.Dataset,
-        batch_size: int = 16384,
-        **kwargs
+        batch_size: int = 128,
+        describe: str = "",
     ):
-        if batch_size is not None and batch_size > 1:
-            dataset = dataset.batch(batch_size)
+        train_interaction_matrix = self.construct_interaction_matrix(self.train_interaction_history)
+        if len(self.test_interaction_history): test_interaction_matrix = self.construct_interaction_matrix(self.test_interaction_history)
+        user_candidates = tf.constant(self.user_lookup_layer.get_vocabulary()[1:], dtype=tf.int64)
+        item_candidates = tf.constant(self.item_lookup_layer.get_vocabulary(), dtype=tf.int64)
+        user_dataset = tf.data.Dataset.from_tensor_slices(user_candidates)
+        user_dataset = user_dataset.batch(128)
 
-        for step, evaluation_batch in enumerate(dataset):
-            break
+        k = 10
+        with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=100, desc=describe) as pbar:
+            for step, user_batch in enumerate(user_dataset):
+                user_indices = self.user_lookup_layer(user_batch)
+                user_embedding = self.user_embedding(user_batch)
+                candidate_item_embedding = self.item_embedding(item_candidates)
+                predicted_scores = tf.matmul(user_embedding, tf.transpose(candidate_item_embedding))
+                # predicted_train_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item | nlog(n)
+                _, predicted_train_topk_indices = tf.math.top_k(predicted_scores, k=k) # partition + partial sort gives you faster result  | n + klog(k)
+
+                # Train Metrics
+                train_ground_truth = gather_dense(train_interaction_matrix, user_indices)
+                # train_true_positives = tf.cast((predicted_train_rankings <= k) * train_ground_truth, tf.int32)
+                # train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true_positives per user
+                train_true_positive_count = tf.reduce_sum(tf.gather(train_ground_truth, predicted_train_topk_indices, batch_dims=-1), axis=-1) # this is equivalent to the commented lines above, and operation followed by sum reduce
+                train_actual_positive_count = tf.reduce_sum(train_ground_truth, axis=-1) # actual positives per user
+
+                train_hit = tf.cast(train_true_positive_count > 0, tf.float32)
+                train_recall = tf.math.divide_no_nan(train_true_positive_count, train_actual_positive_count)
+                train_precision = tf.math.divide_no_nan(train_true_positive_count, k)
+
+                self.train_hit_rate_tracker.update_state(train_hit)
+                self.train_recall_tracker.update_state(train_recall)
+                self.train_precision_tracker.update_state(train_precision)
+
+                # Test Metrics
+                if self.test_interaction_history is not None:
+                    # mask train interactions
+                    ranking_mask = tf.where(train_ground_truth==1, float('inf'), 0.0)
+                    # predicted_test_rankings = tf.argsort(tf.argsort((predicted_scores - ranking_mask), direction='DESCENDING', axis=-1), axis=-1) + 1
+                    _, predicted_test_topk_indices = tf.math.top_k(predicted_scores - ranking_mask, k=k)
+
+                    test_ground_truth = gather_dense(test_interaction_matrix, user_indices)
+                    # test_true_positives = tf.cast((predicted_test_rankings <= k) * test_ground_truth, tf.int32)
+                    # test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true_positives per user
+                    test_true_positive_count = tf.reduce_sum(tf.gather(test_ground_truth, predicted_test_topk_indices, batch_dims=-1), axis=-1)
+                    test_actual_positive_count = tf.reduce_sum(test_ground_truth, axis=-1) # actual positives per user
+
+                    test_hit = tf.cast(test_true_positive_count > 0, tf.float32)
+                    test_recall = tf.math.divide_no_nan(test_true_positive_count, test_actual_positive_count)
+                    test_precision = tf.math.divide_no_nan(test_true_positive_count, k)
+
+                    self.test_hit_rate_tracker.update_state(test_hit)
+                    self.test_recall_tracker.update_state(test_recall)
+                    self.test_precision_tracker.update_state(test_precision)
+        
+                pbar.update(len(user_batch))
+
+        # finalize metrics
+        self.train_hit_rate_history.append(float(self.train_hit_rate_tracker.result()))
+        self.train_recall_history.append(float(self.train_recall_tracker.result()))
+        self.train_precision_history.append(float(self.train_precision_tracker.result()))
+        if len(self.test_interaction_history):
+            self.test_hit_rate_history.append(float(self.test_hit_rate_tracker.result()))
+            self.test_recall_history.append(float(self.test_recall_tracker.result()))
+            self.test_precision_history.append(float(self.test_precision_tracker.result()))
 
     def construct_interaction_matrix(
         self,
