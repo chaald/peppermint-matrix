@@ -14,3 +14,6 @@ def is_notebook() -> bool:
             return False  # Other type (?)
     except NameError:
         return False      # Probably standard Python interpreter
+    
+def preprocess_metric_aggregate(metrics_aggregate):
+    return {key: f"{value:.4f}" for key, value in metrics_aggregate.items() if key in ["loss", "test_loss", "recall", "test_recall"]}

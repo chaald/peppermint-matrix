@@ -4,6 +4,7 @@ import keras
 from tqdm import tqdm
 
 from src.baremetal import gather_dense
+from src.utils import preprocess_metric_aggregate
 from src.sampler import SimpleSampler
 from src.preprocessing import FeatureMeta
 from typing import Union, Iterable
@@ -194,7 +195,7 @@ class MatrixFactorization(keras.Model):
 
                     callbacks.on_train_batch_end(step, metrics_aggregate)
                     pbar.update(len(user_ids))
-                    pbar.set_postfix(metrics_aggregate)
+                    pbar.set_postfix(preprocess_metric_aggregate(metrics_aggregate))
 
                 # finalize training interaction history and loss
                 self.train_interaction_history = tf.concat(self.train_interaction_history, axis=0)
@@ -230,7 +231,7 @@ class MatrixFactorization(keras.Model):
                         metrics_aggregate.update({"test_loss": float(self.test_loss_tracker.result())})
 
                         pbar.update(len(user_ids))
-                        pbar.set_postfix(metrics_aggregate)
+                        pbar.set_postfix(preprocess_metric_aggregate(metrics_aggregate))
 
                     # finalize test interaction history and loss
                     self.test_interaction_history = tf.concat(self.test_interaction_history, axis=0)
@@ -320,7 +321,7 @@ class MatrixFactorization(keras.Model):
                     })
         
                 pbar.update(len(user_batch))
-                pbar.set_postfix({key: value for key, value in metrics_aggregate.items() if key in ["recall", "test_recall"]})
+                pbar.set_postfix(preprocess_metric_aggregate(metrics_aggregate))
         
         # finalize metrics
         self.train_hit_rate_history.append(float(self.train_hit_rate_tracker.result()))
