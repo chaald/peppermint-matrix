@@ -144,7 +144,8 @@ class MatrixFactorization(keras.Model):
             self.test_interaction_history = []
 
             # Training Loop
-            with tqdm(total=train_dataset_length, ncols=100, desc=f"TL [{epoch+1}/{nepochs}]") as pbar:
+            metrics_aggregate = {}
+            with tqdm(total=train_dataset_length + test_dataset_length, ncols=176, desc=f"TL [{epoch+1}/{nepochs}]") as pbar:
                 for step, training_batch in enumerate(train_dataset):
                     user_ids = training_batch["user_id"]
                     item_ids = training_batch["item_id"]
@@ -177,47 +178,50 @@ class MatrixFactorization(keras.Model):
                     user_indices = self.user_lookup_layer(user_ids)
                     item_indices = self.item_lookup_layer(item_ids)
                     self.train_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
+                    metrics_aggregate.update({"loss": float(self.train_loss_tracker.result())})
 
                     pbar.update(len(user_ids))
-                    pbar.set_postfix({
-                        "loss": float(self.train_loss_tracker.result())
-                    })
+                    pbar.set_postfix(metrics_aggregate)
 
                 # finalize training interaction history and loss
                 self.train_interaction_history = tf.concat(self.train_interaction_history, axis=0)
                 self.train_loss_history.append(float(self.train_loss_tracker.result()))
             
-            # Test Loop
-            if test_dataset is not None:
-                for step, evaluation_batch in enumerate(test_dataset):
-                    user_ids = evaluation_batch["user_id"]
-                    item_ids = evaluation_batch["item_id"]
+                # Test Loop
+                if test_dataset is not None:
+                    for step, evaluation_batch in enumerate(test_dataset):
+                        user_ids = evaluation_batch["user_id"]
+                        item_ids = evaluation_batch["item_id"]
 
-                    # random negative sample
-                    random_negatives = self.sampler.sample(user_ids)
+                        # random negative sample
+                        random_negatives = self.sampler.sample(user_ids)
 
-                    # forward pass
-                    user_embedding = self.user_embedding(user_ids)
-                    item_embedding = self.item_embedding(item_ids)
-                    negative_embedding = self.item_embedding(random_negatives)
+                        # forward pass
+                        user_embedding = self.user_embedding(user_ids)
+                        item_embedding = self.item_embedding(item_ids)
+                        negative_embedding = self.item_embedding(random_negatives)
 
-                    loss_value = self.calculate_loss(
-                        user_embeddings=user_embedding,
-                        positive_item_embeddings=item_embedding,
-                        negative_item_embeddings=negative_embedding
-                    )
+                        loss_value = self.calculate_loss(
+                            user_embeddings=user_embedding,
+                            positive_item_embeddings=item_embedding,
+                            negative_item_embeddings=negative_embedding
+                        )
 
-                    # update test loss
-                    self.test_loss_tracker.update_state(loss_value)
+                        # update test loss
+                        self.test_loss_tracker.update_state(loss_value)
 
-                    # record interaction history
-                    user_indices = self.user_lookup_layer(user_ids)
-                    item_indices = self.item_lookup_layer(item_ids)
-                    self.test_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
-                
-                # finalize test interaction history and loss
-                self.test_interaction_history = tf.concat(self.test_interaction_history, axis=0)
-                self.test_loss_history.append(float(self.test_loss_tracker.result()))
+                        # record interaction history
+                        user_indices = self.user_lookup_layer(user_ids)
+                        item_indices = self.item_lookup_layer(item_ids)
+                        self.test_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
+                        metrics_aggregate.update({"test_loss": float(self.test_loss_tracker.result())})
+
+                        pbar.update(len(user_ids))
+                        pbar.set_postfix(metrics_aggregate)
+
+                    # finalize test interaction history and loss
+                    self.test_interaction_history = tf.concat(self.test_interaction_history, axis=0)
+                    self.test_loss_history.append(float(self.test_loss_tracker.result()))
 
             # Offline Evaluation
             self.evaluate(
@@ -237,7 +241,8 @@ class MatrixFactorization(keras.Model):
         user_dataset = user_dataset.batch(batch_size)
 
         k = 10
-        with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=100, desc=describe) as pbar:
+        metrics_aggregate = {}
+        with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=176, desc=describe) as pbar:
             for step, user_batch in enumerate(user_dataset):
                 user_indices = self.user_lookup_layer(user_batch)
                 user_embedding = self.user_embedding(user_batch)
@@ -260,6 +265,7 @@ class MatrixFactorization(keras.Model):
                 self.train_hit_rate_tracker.update_state(train_hit)
                 self.train_recall_tracker.update_state(train_recall)
                 self.train_precision_tracker.update_state(train_precision)
+                metrics_aggregate.update({"recall": float(self.train_recall_tracker.result())})
 
                 # Test Metrics
                 if self.test_interaction_history is not None:
@@ -281,8 +287,10 @@ class MatrixFactorization(keras.Model):
                     self.test_hit_rate_tracker.update_state(test_hit)
                     self.test_recall_tracker.update_state(test_recall)
                     self.test_precision_tracker.update_state(test_precision)
+                    metrics_aggregate.update({"test_recall": float(self.test_recall_tracker.result())})
         
                 pbar.update(len(user_batch))
+                pbar.set_postfix(metrics_aggregate)
 
         # finalize metrics
         self.train_hit_rate_history.append(float(self.train_hit_rate_tracker.result()))
