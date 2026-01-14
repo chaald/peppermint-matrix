@@ -189,45 +189,40 @@ class MatrixFactorization(keras.Model):
             
             # Test Loop
             if test_dataset is not None:
-                test_loss = self.compute_test_loss(test_dataset)
-                self.test_loss_history.append(test_loss)
+                for step, evaluation_batch in enumerate(test_dataset):
+                    user_ids = evaluation_batch["user_id"]
+                    item_ids = evaluation_batch["item_id"]
+
+                    # random negative sample
+                    random_negatives = self.sampler.sample(user_ids)
+
+                    # forward pass
+                    user_embedding = self.user_embedding(user_ids)
+                    item_embedding = self.item_embedding(item_ids)
+                    negative_embedding = self.item_embedding(random_negatives)
+
+                    loss_value = self.calculate_loss(
+                        user_embeddings=user_embedding,
+                        positive_item_embeddings=item_embedding,
+                        negative_item_embeddings=negative_embedding
+                    )
+
+                    # update test loss
+                    self.test_loss_tracker.update_state(loss_value)
+
+                    # record interaction history
+                    user_indices = self.user_lookup_layer(user_ids)
+                    item_indices = self.item_lookup_layer(item_ids)
+                    self.test_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
+                
+                # finalize test interaction history and loss
+                self.test_interaction_history = tf.concat(self.test_interaction_history, axis=0)
+                self.test_loss_history.append(float(self.test_loss_tracker.result()))
 
             # Offline Evaluation
             self.evaluate(
                 describe=f"OE [{epoch+1}/{nepochs}]"
             )
-    
-    def compute_test_loss(self, test_dataset: tf.data.Dataset):
-        for step, evaluation_batch in enumerate(test_dataset):
-            user_ids = evaluation_batch["user_id"]
-            item_ids = evaluation_batch["item_id"]
-
-            # random negative sample
-            random_negatives = self.sampler.sample(user_ids)
-
-            # forward pass
-            user_embedding = self.user_embedding(user_ids)
-            item_embedding = self.item_embedding(item_ids)
-            negative_embedding = self.item_embedding(random_negatives)
-
-            loss_value = self.calculate_loss(
-                user_embeddings=user_embedding,
-                positive_item_embeddings=item_embedding,
-                negative_item_embeddings=negative_embedding
-            )
-
-            # update test loss
-            self.test_loss_tracker.update_state(loss_value)
-
-            # record interaction history
-            user_indices = self.user_lookup_layer(user_ids)
-            item_indices = self.item_lookup_layer(item_ids)
-            self.test_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
-        
-        # finalize test interaction history and loss
-        self.test_interaction_history = tf.concat(self.test_interaction_history, axis=0)
-
-        return float(self.test_loss_tracker.result())
             
     def evaluate(
         self,
@@ -239,7 +234,7 @@ class MatrixFactorization(keras.Model):
         user_candidates = tf.constant(self.user_lookup_layer.get_vocabulary()[1:], dtype=tf.int64)
         item_candidates = tf.constant(self.item_lookup_layer.get_vocabulary(), dtype=tf.int64)
         user_dataset = tf.data.Dataset.from_tensor_slices(user_candidates)
-        user_dataset = user_dataset.batch(128)
+        user_dataset = user_dataset.batch(batch_size)
 
         k = 10
         with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=100, desc=describe) as pbar:
