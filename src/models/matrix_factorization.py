@@ -7,7 +7,7 @@ from src.baremetal import gather_dense
 from src.utils import preprocess_metric_aggregate
 from src.sampler import SimpleSampler
 from src.preprocessing import FeatureMeta
-from typing import Union, Iterable
+from typing import Union, Iterable, Dict, List
 
 class MatrixFactorization(keras.Model):
     """
@@ -48,36 +48,52 @@ class MatrixFactorization(keras.Model):
             embeddings_regularizer=keras.regularizers.l1_l2(l1=l1_regularization, l2=l2_regularization)
         )
 
-        # Loss & Metrics Tracker
-        self.train_loss_tracker = keras.metrics.Mean(name="train_loss")
-        self.train_hit_rate_tracker = keras.metrics.Mean(name="train_hit_rate")
-        self.train_recall_tracker = keras.metrics.Mean(name="train_recall")
-        self.train_precision_tracker = keras.metrics.Mean(name="train_precision")
-        self.test_loss_tracker = keras.metrics.Mean(name="test_loss")
-        self.test_hit_rate_tracker = keras.metrics.Mean(name="test_hit_rate")
-        self.test_recall_tracker = keras.metrics.Mean(name="test_recall")
-        self.test_precision_tracker = keras.metrics.Mean(name="test_precision")
-
-        # Loss & Metrics History
-        self.train_loss_history = []
-        self.train_hit_rate_history = []
-        self.train_recall_history = []
-        self.train_precision_history = []
-        self.test_loss_history = []
-        self.test_hit_rate_history = []
-        self.test_recall_history = []
-        self.test_precision_history = []
-
     def compile(
         self, 
         optimizer: keras.optimizers.Optimizer,
         loss_functions: Union[keras.losses.Loss, Iterable[keras.losses.Loss]],
         sampler: SimpleSampler,
+        evaluation_cutoffs: list = [2, 10, 50],
         **kwargs
     ):
         self.optimizer = optimizer
         self.loss_functions = loss_functions
         self.sampler = sampler
+        self.evaluation_cutoffs = evaluation_cutoffs
+
+        # Loss & Metrics Tracker
+        self.train_loss_tracker = keras.metrics.Mean(name="train_loss")
+        self.test_loss_tracker = keras.metrics.Mean(name="test_loss")
+        self.train_hit_rate_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.train_recall_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.train_precision_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.test_hit_rate_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.test_recall_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.test_precision_tracker: Dict[int, keras.metrics.Mean] = dict()
+        for k in evaluation_cutoffs:
+            self.train_hit_rate_tracker[k] = keras.metrics.Mean(name=f"train_hit_rate@{k}")
+            self.train_recall_tracker[k] = keras.metrics.Mean(name=f"train_recall@{k}")
+            self.train_precision_tracker[k] = keras.metrics.Mean(name=f"train_precision@{k}")
+            self.test_hit_rate_tracker[k] = keras.metrics.Mean(name=f"test_hit_rate@{k}")
+            self.test_recall_tracker[k] = keras.metrics.Mean(name=f"test_recall@{k}")
+            self.test_precision_tracker[k] = keras.metrics.Mean(name=f"test_precision@{k}")
+
+        # Loss & Metrics History
+        self.train_loss_history = []
+        self.test_loss_history = []
+        self.train_hit_rate_history: Dict[int, List[float]] = dict()
+        self.train_recall_history: Dict[int, List[float]] = dict()
+        self.train_precision_history: Dict[int, List[float]] = dict()
+        self.test_hit_rate_history: Dict[int, List[float]] = dict()
+        self.test_recall_history: Dict[int, List[float]] = dict()
+        self.test_precision_history: Dict[int, List[float]] = dict()
+        for k in evaluation_cutoffs:
+            self.train_hit_rate_history[k] = []
+            self.train_recall_history[k] = []
+            self.train_precision_history[k] = []
+            self.test_hit_rate_history[k] = []
+            self.test_recall_history[k] = []
+            self.test_precision_history[k] = []
 
     def call(self, user_ids: tf.Tensor, item_ids: tf.Tensor) -> tf.Tensor:
         user_embedding = self.user_embedding(user_ids)
@@ -263,7 +279,7 @@ class MatrixFactorization(keras.Model):
         user_dataset = tf.data.Dataset.from_tensor_slices(user_candidates)
         user_dataset = user_dataset.batch(batch_size)
 
-        k = 10
+        maxk = max(self.evaluation_cutoffs)
         metrics_aggregate = {}
         with tqdm(total=self.user_lookup_layer.vocabulary_size() - 1, ncols=176, desc=describe) as pbar:
             for step, user_batch in enumerate(user_dataset):
@@ -272,65 +288,70 @@ class MatrixFactorization(keras.Model):
                 candidate_item_embedding = self.item_embedding(item_candidates)
                 predicted_scores = tf.matmul(user_embedding, tf.transpose(candidate_item_embedding))
                 # predicted_train_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item | nlog(n)
-                _, predicted_train_topk_indices = tf.math.top_k(predicted_scores, k=k) # partition + partial sort gives you faster result  | n + klog(k)
+                _, predicted_train_indices = tf.math.top_k(predicted_scores, k=maxk) # partition + partial sort gives you faster result  | n + klog(k)
 
                 # Train Metrics
                 train_ground_truth = gather_dense(train_interaction_matrix, user_indices)
-                # train_true_positives = tf.cast((predicted_train_rankings <= k) * train_ground_truth, tf.int32)
-                # train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true_positives per user
-                train_true_positive_count = tf.reduce_sum(tf.gather(train_ground_truth, predicted_train_topk_indices, batch_dims=-1), axis=-1) # this is equivalent to the commented lines above, and operation followed by sum reduce
                 train_actual_positive_count = tf.reduce_sum(train_ground_truth, axis=-1) # actual positives per user
+                for k in sorted(self.evaluation_cutoffs, reverse=True):
+                    predicted_train_indices_k = predicted_train_indices[:, :k]
+                    # train_true_positives = tf.cast((predicted_train_rankings <= k) * train_ground_truth, tf.int32)
+                    # train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true_positives per user
+                    train_true_positive_count = tf.reduce_sum(tf.gather(train_ground_truth, predicted_train_indices_k, batch_dims=-1), axis=-1) # this is equivalent to the commented lines above, and operation followed by sum reduce
 
-                train_hit = tf.cast(train_true_positive_count > 0, tf.float32)
-                train_recall = tf.math.divide_no_nan(train_true_positive_count, train_actual_positive_count)
-                train_precision = tf.math.divide_no_nan(train_true_positive_count, k)
+                    train_hit = tf.cast(train_true_positive_count > 0, tf.float32)
+                    train_recall = tf.math.divide_no_nan(train_true_positive_count, train_actual_positive_count)
+                    train_precision = tf.math.divide_no_nan(train_true_positive_count, k)
 
-                self.train_hit_rate_tracker.update_state(train_hit)
-                self.train_recall_tracker.update_state(train_recall)
-                self.train_precision_tracker.update_state(train_precision)
-                metrics_aggregate.update({
-                    "hit_rate": float(self.train_hit_rate_tracker.result()),
-                    "recall": float(self.train_recall_tracker.result()),
-                    "precision": float(self.train_precision_tracker.result())
-                })
+                    self.train_hit_rate_tracker[k].update_state(train_hit)
+                    self.train_recall_tracker[k].update_state(train_recall)
+                    self.train_precision_tracker[k].update_state(train_precision)
+                    metrics_aggregate.update({
+                        f"hit_rate@{k}": float(self.train_hit_rate_tracker[k].result()),
+                        f"recall@{k}": float(self.train_recall_tracker[k].result()),
+                        f"precision@{k}": float(self.train_precision_tracker[k].result())
+                    })
 
                 # Test Metrics
-                if self.test_interaction_history is not None:
+                if len(self.test_interaction_history):
                     # mask train interactions
                     ranking_mask = tf.where(train_ground_truth==1, float('inf'), 0.0)
                     # predicted_test_rankings = tf.argsort(tf.argsort((predicted_scores - ranking_mask), direction='DESCENDING', axis=-1), axis=-1) + 1
-                    _, predicted_test_topk_indices = tf.math.top_k(predicted_scores - ranking_mask, k=k)
+                    _, predicted_test_indices = tf.math.top_k(predicted_scores - ranking_mask, k=maxk)
 
                     test_ground_truth = gather_dense(test_interaction_matrix, user_indices)
-                    # test_true_positives = tf.cast((predicted_test_rankings <= k) * test_ground_truth, tf.int32)
-                    # test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true_positives per user
-                    test_true_positive_count = tf.reduce_sum(tf.gather(test_ground_truth, predicted_test_topk_indices, batch_dims=-1), axis=-1)
                     test_actual_positive_count = tf.reduce_sum(test_ground_truth, axis=-1) # actual positives per user
+                    for k in sorted(self.evaluation_cutoffs, reverse=True):
+                        predicted_test_indices_k = predicted_test_indices[:, :k]
+                        # test_true_positives = tf.cast((predicted_test_rankings <= k) * test_ground_truth, tf.int32)
+                        # test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true_positives per user
+                        test_true_positive_count = tf.reduce_sum(tf.gather(test_ground_truth, predicted_test_indices_k, batch_dims=-1), axis=-1)
 
-                    test_hit = tf.cast(test_true_positive_count > 0, tf.float32)
-                    test_recall = tf.math.divide_no_nan(test_true_positive_count, test_actual_positive_count)
-                    test_precision = tf.math.divide_no_nan(test_true_positive_count, k)
+                        test_hit = tf.cast(test_true_positive_count > 0, tf.float32)
+                        test_recall = tf.math.divide_no_nan(test_true_positive_count, test_actual_positive_count)
+                        test_precision = tf.math.divide_no_nan(test_true_positive_count, k)
 
-                    self.test_hit_rate_tracker.update_state(test_hit)
-                    self.test_recall_tracker.update_state(test_recall)
-                    self.test_precision_tracker.update_state(test_precision)
-                    metrics_aggregate.update({
-                        "test_hit_rate": float(self.test_hit_rate_tracker.result()),
-                        "test_recall": float(self.test_recall_tracker.result()),
-                        "test_precision": float(self.test_precision_tracker.result())
-                    })
+                        self.test_hit_rate_tracker[k].update_state(test_hit)
+                        self.test_recall_tracker[k].update_state(test_recall)
+                        self.test_precision_tracker[k].update_state(test_precision)
+                        metrics_aggregate.update({
+                            f"test_hit_rate@{k}": float(self.test_hit_rate_tracker[k].result()),
+                            f"test_recall@{k}": float(self.test_recall_tracker[k].result()),
+                            f"test_precision@{k}": float(self.test_precision_tracker[k].result())
+                        })
         
                 pbar.update(len(user_batch))
-                pbar.set_postfix(preprocess_metric_aggregate(metrics_aggregate))
-        
+                pbar.set_postfix(preprocess_metric_aggregate(metrics_aggregate))            
+
         # finalize metrics
-        self.train_hit_rate_history.append(float(self.train_hit_rate_tracker.result()))
-        self.train_recall_history.append(float(self.train_recall_tracker.result()))
-        self.train_precision_history.append(float(self.train_precision_tracker.result()))
-        if len(self.test_interaction_history):
-            self.test_hit_rate_history.append(float(self.test_hit_rate_tracker.result()))
-            self.test_recall_history.append(float(self.test_recall_tracker.result()))
-            self.test_precision_history.append(float(self.test_precision_tracker.result()))
+        for k in self.evaluation_cutoffs:
+            self.train_hit_rate_history[k].append(float(self.train_hit_rate_tracker[k].result()))
+            self.train_recall_history[k].append(float(self.train_recall_tracker[k].result()))
+            self.train_precision_history[k].append(float(self.train_precision_tracker[k].result()))
+            if len(self.test_interaction_history):
+                self.test_hit_rate_history[k].append(float(self.test_hit_rate_tracker[k].result()))
+                self.test_recall_history[k].append(float(self.test_recall_tracker[k].result()))
+                self.test_precision_history[k].append(float(self.test_precision_tracker[k].result()))
 
         return metrics_aggregate
 
