@@ -119,6 +119,7 @@ class MatrixFactorization(keras.Model):
         nepochs: int = 1,
         shuffle: bool = True,
         batch_size: int = 16384,
+        callbacks: list = [],
         **kwargs
     ):
         # Validation Check for Loss Functions
@@ -129,6 +130,14 @@ class MatrixFactorization(keras.Model):
         if not self.optimizer:
             raise ValueError("Optimizer must be provided before training. Please compile the model with an appropriate optimizer.")
 
+        # Initialize Callbacks
+        self.stop_training = False
+        if not isinstance(callbacks, keras.callbacks.CallbackList):
+            callbacks = keras.callbacks.CallbackList(
+                callbacks,
+                model=self,
+            )
+
         # Dataset Preparation
         train_dataset_length = len(train_dataset)
         test_dataset_length = len(test_dataset) if test_dataset is not None else 0
@@ -138,15 +147,18 @@ class MatrixFactorization(keras.Model):
             train_dataset = train_dataset.batch(batch_size)
             test_dataset = test_dataset.batch(batch_size) if test_dataset is not None else None
         
+        callbacks.on_train_begin()
         for epoch in range(nepochs):
             self.reset_metrics()
             self.train_interaction_history = []
             self.test_interaction_history = []
+            callbacks.on_epoch_begin(epoch)
 
             # Training Loop
             metrics_aggregate = {}
             with tqdm(total=train_dataset_length + test_dataset_length, ncols=176, desc=f"TL [{epoch+1}/{nepochs}]") as pbar:
                 for step, training_batch in enumerate(train_dataset):
+                    callbacks.on_train_batch_begin(step)
                     user_ids = training_batch["user_id"]
                     item_ids = training_batch["item_id"]
 
@@ -180,6 +192,7 @@ class MatrixFactorization(keras.Model):
                     self.train_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
                     metrics_aggregate.update({"loss": float(self.train_loss_tracker.result())})
 
+                    callbacks.on_train_batch_end(step, metrics_aggregate)
                     pbar.update(len(user_ids))
                     pbar.set_postfix(metrics_aggregate)
 
@@ -224,9 +237,18 @@ class MatrixFactorization(keras.Model):
                     self.test_loss_history.append(float(self.test_loss_tracker.result()))
 
             # Offline Evaluation
-            self.evaluate(
+            evaluation_result = self.evaluate(
                 describe=f"OE [{epoch+1}/{nepochs}]"
             )
+            metrics_aggregate.update(evaluation_result)
+
+            callbacks.on_epoch_end(epoch, metrics_aggregate)
+
+            # Early Stopping Check
+            if self.stop_training:
+                break
+
+        callbacks.on_train_end(metrics_aggregate)
             
     def evaluate(
         self,
@@ -265,7 +287,11 @@ class MatrixFactorization(keras.Model):
                 self.train_hit_rate_tracker.update_state(train_hit)
                 self.train_recall_tracker.update_state(train_recall)
                 self.train_precision_tracker.update_state(train_precision)
-                metrics_aggregate.update({"recall": float(self.train_recall_tracker.result())})
+                metrics_aggregate.update({
+                    "hit_rate": float(self.train_hit_rate_tracker.result()),
+                    "recall": float(self.train_recall_tracker.result()),
+                    "precision": float(self.train_precision_tracker.result())
+                })
 
                 # Test Metrics
                 if self.test_interaction_history is not None:
@@ -287,11 +313,15 @@ class MatrixFactorization(keras.Model):
                     self.test_hit_rate_tracker.update_state(test_hit)
                     self.test_recall_tracker.update_state(test_recall)
                     self.test_precision_tracker.update_state(test_precision)
-                    metrics_aggregate.update({"test_recall": float(self.test_recall_tracker.result())})
+                    metrics_aggregate.update({
+                        "test_hit_rate": float(self.test_hit_rate_tracker.result()),
+                        "test_recall": float(self.test_recall_tracker.result()),
+                        "test_precision": float(self.test_precision_tracker.result())
+                    })
         
                 pbar.update(len(user_batch))
-                pbar.set_postfix(metrics_aggregate)
-
+                pbar.set_postfix({key: value for key, value in metrics_aggregate.items() if key in ["recall", "test_recall"]})
+        
         # finalize metrics
         self.train_hit_rate_history.append(float(self.train_hit_rate_tracker.result()))
         self.train_recall_history.append(float(self.train_recall_tracker.result()))
@@ -300,6 +330,8 @@ class MatrixFactorization(keras.Model):
             self.test_hit_rate_history.append(float(self.test_hit_rate_tracker.result()))
             self.test_recall_history.append(float(self.test_recall_tracker.result()))
             self.test_precision_history.append(float(self.test_precision_tracker.result()))
+
+        return metrics_aggregate
 
     def construct_interaction_matrix(
         self,
