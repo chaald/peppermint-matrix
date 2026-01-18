@@ -1,4 +1,5 @@
 import os
+from typing import Dict
 
 def is_notebook() -> bool:
     "Check if the code is running in a Jupyter notebook environment."
@@ -15,5 +16,8 @@ def is_notebook() -> bool:
     except NameError:
         return False      # Probably standard Python interpreter
     
-def preprocess_metric_aggregate(metrics_aggregate):
+def filter_vocabulary(features_meta: Dict[str, Dict]) -> Dict[str, Dict]:
+    return {feature_name: {k: v for k, v in meta.items() if k not in ["vocabulary"]} for feature_name, meta in features_meta.items()}
+
+def preprocess_metric_aggregate(metrics_aggregate: Dict[str, float]) -> Dict[str, str]:
     return {key: f"{value:.4f}" for key, value in metrics_aggregate.items() if key in ["loss", "test_loss", "recall@10", "test_recall@10"]}

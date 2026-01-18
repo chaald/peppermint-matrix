@@ -3,7 +3,17 @@ import tensorflow as tf
 
 from typing import Iterable, Dict
 
-class SimpleSampler:
+class BayesianSampler:
+    """
+    Samples negative items for users ensuring that sampled items are not in the user's positive interactions.
+    Ensuring the training and test sample are disjoint as described in the original paper [1].
+
+    References:
+    [1] Steffen Rendle, Christoph Freudenthaler, Zeno Gantner and Lars Schmidt-Thieme.
+        "BPR: Bayesian Personalized Ranking from Implicit Feedback"
+        https://arxiv.org/abs/1205.2618
+    """
+
     def __init__(self, item_set: Iterable[int], user_items: Dict[int, Iterable[int]]):
         self.item_set = np.array(item_set) # stored as numpy array for efficient sampling
         self.user_items = user_items

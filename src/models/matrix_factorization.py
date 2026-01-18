@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from src.baremetal import gather_dense
 from src.utils import preprocess_metric_aggregate
-from src.sampler import SimpleSampler
+from src.sampler import BayesianSampler
 from src.preprocessing import FeatureMeta
 from typing import Union, Iterable, Dict, List
 
@@ -52,7 +52,7 @@ class MatrixFactorization(keras.Model):
         self, 
         optimizer: keras.optimizers.Optimizer,
         loss_functions: Union[keras.losses.Loss, Iterable[keras.losses.Loss]],
-        sampler: SimpleSampler,
+        sampler: BayesianSampler,
         evaluation_cutoffs: list = [2, 10, 50],
         **kwargs
     ):
@@ -266,6 +266,7 @@ class MatrixFactorization(keras.Model):
                 break
 
         callbacks.on_train_end(metrics_aggregate)
+        return metrics_aggregate
             
     def evaluate(
         self,
