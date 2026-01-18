@@ -64,34 +64,34 @@ class MatrixFactorization(keras.Model):
         # Loss & Metrics Tracker
         self.train_loss_tracker = keras.metrics.Mean(name="train_loss")
         self.test_loss_tracker = keras.metrics.Mean(name="test_loss")
-        self.train_hit_rate_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.train_hitrate_tracker: Dict[int, keras.metrics.Mean] = dict()
         self.train_recall_tracker: Dict[int, keras.metrics.Mean] = dict()
         self.train_precision_tracker: Dict[int, keras.metrics.Mean] = dict()
-        self.test_hit_rate_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.test_hitrate_tracker: Dict[int, keras.metrics.Mean] = dict()
         self.test_recall_tracker: Dict[int, keras.metrics.Mean] = dict()
         self.test_precision_tracker: Dict[int, keras.metrics.Mean] = dict()
         for k in evaluation_cutoffs:
-            self.train_hit_rate_tracker[k] = keras.metrics.Mean(name=f"train_hit_rate@{k}")
+            self.train_hitrate_tracker[k] = keras.metrics.Mean(name=f"train_hitrate@{k}")
             self.train_recall_tracker[k] = keras.metrics.Mean(name=f"train_recall@{k}")
             self.train_precision_tracker[k] = keras.metrics.Mean(name=f"train_precision@{k}")
-            self.test_hit_rate_tracker[k] = keras.metrics.Mean(name=f"test_hit_rate@{k}")
+            self.test_hitrate_tracker[k] = keras.metrics.Mean(name=f"test_hitrate@{k}")
             self.test_recall_tracker[k] = keras.metrics.Mean(name=f"test_recall@{k}")
             self.test_precision_tracker[k] = keras.metrics.Mean(name=f"test_precision@{k}")
 
         # Loss & Metrics History
         self.train_loss_history = []
         self.test_loss_history = []
-        self.train_hit_rate_history: Dict[int, List[float]] = dict()
+        self.train_hitrate_history: Dict[int, List[float]] = dict()
         self.train_recall_history: Dict[int, List[float]] = dict()
         self.train_precision_history: Dict[int, List[float]] = dict()
-        self.test_hit_rate_history: Dict[int, List[float]] = dict()
+        self.test_hitrate_history: Dict[int, List[float]] = dict()
         self.test_recall_history: Dict[int, List[float]] = dict()
         self.test_precision_history: Dict[int, List[float]] = dict()
         for k in evaluation_cutoffs:
-            self.train_hit_rate_history[k] = []
+            self.train_hitrate_history[k] = []
             self.train_recall_history[k] = []
             self.train_precision_history[k] = []
-            self.test_hit_rate_history[k] = []
+            self.test_hitrate_history[k] = []
             self.test_recall_history[k] = []
             self.test_precision_history[k] = []
 
@@ -304,11 +304,11 @@ class MatrixFactorization(keras.Model):
                     train_recall = tf.math.divide_no_nan(train_true_positive_count, train_actual_positive_count)
                     train_precision = tf.math.divide_no_nan(train_true_positive_count, k)
 
-                    self.train_hit_rate_tracker[k].update_state(train_hit)
+                    self.train_hitrate_tracker[k].update_state(train_hit)
                     self.train_recall_tracker[k].update_state(train_recall)
                     self.train_precision_tracker[k].update_state(train_precision)
                     metrics_aggregate.update({
-                        f"hit_rate@{k}": float(self.train_hit_rate_tracker[k].result()),
+                        f"hitrate@{k}": float(self.train_hitrate_tracker[k].result()),
                         f"recall@{k}": float(self.train_recall_tracker[k].result()),
                         f"precision@{k}": float(self.train_precision_tracker[k].result())
                     })
@@ -332,11 +332,11 @@ class MatrixFactorization(keras.Model):
                         test_recall = tf.math.divide_no_nan(test_true_positive_count, test_actual_positive_count)
                         test_precision = tf.math.divide_no_nan(test_true_positive_count, k)
 
-                        self.test_hit_rate_tracker[k].update_state(test_hit)
+                        self.test_hitrate_tracker[k].update_state(test_hit)
                         self.test_recall_tracker[k].update_state(test_recall)
                         self.test_precision_tracker[k].update_state(test_precision)
                         metrics_aggregate.update({
-                            f"test_hit_rate@{k}": float(self.test_hit_rate_tracker[k].result()),
+                            f"test_hitrate@{k}": float(self.test_hitrate_tracker[k].result()),
                             f"test_recall@{k}": float(self.test_recall_tracker[k].result()),
                             f"test_precision@{k}": float(self.test_precision_tracker[k].result())
                         })
@@ -346,11 +346,11 @@ class MatrixFactorization(keras.Model):
 
         # finalize metrics
         for k in self.evaluation_cutoffs:
-            self.train_hit_rate_history[k].append(float(self.train_hit_rate_tracker[k].result()))
+            self.train_hitrate_history[k].append(float(self.train_hitrate_tracker[k].result()))
             self.train_recall_history[k].append(float(self.train_recall_tracker[k].result()))
             self.train_precision_history[k].append(float(self.train_precision_tracker[k].result()))
             if len(self.test_interaction_history):
-                self.test_hit_rate_history[k].append(float(self.test_hit_rate_tracker[k].result()))
+                self.test_hitrate_history[k].append(float(self.test_hitrate_tracker[k].result()))
                 self.test_recall_history[k].append(float(self.test_recall_tracker[k].result()))
                 self.test_precision_history[k].append(float(self.test_precision_tracker[k].result()))
 
