@@ -207,7 +207,7 @@ class MatrixFactorization(keras.Model):
                     user_indices = self.user_lookup_layer(user_ids)
                     item_indices = self.item_lookup_layer(item_ids)
                     self.train_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
-                    metrics_aggregate.update({"loss": float(self.train_loss_tracker.result())})
+                    metrics_aggregate.update({"loss": float(self.train_loss_tracker.result()), "step_delta": len(user_ids)})
 
                     callbacks.on_train_batch_end(step, metrics_aggregate)
                     pbar.update(len(user_ids))

@@ -82,20 +82,21 @@ def main(**config):
             BayesianPersonalizedRankingLoss()
         ],
         sampler=sampler,
-        evaluation_cutoffs=[2, 10, 50]
+        evaluation_cutoffs=config["evaluation_cutoffs"]
     )
 
     # C. Model Training
     callbacks = []
-    callbacks.append(
-        keras.callbacks.EarlyStopping(
-            monitor="test_recall@10",
-            mode="max",
-            patience=0,
-            restore_best_weights=True,
-            verbose=1
+    if config["early_stopping"]:
+        callbacks.append(
+                keras.callbacks.EarlyStopping(
+                    monitor=config["early_stopping_monitor"],
+                    mode=config["early_stopping_mode"],
+                    patience=config["early_stopping_patience"],
+                    restore_best_weights=True,
+                    verbose=1
+            )
         )
-    )
     callbacks.append(
         WandbMetricsLogger(
             log_freq="epoch",
@@ -120,11 +121,17 @@ def main(**config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="matrix_factorization")
+    # training configurations
     parser.add_argument("--max_epoch", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=16384)
-    parser.add_argument("--shuffle", type=bool, default=True)
+    parser.add_argument("--shuffle", action="store_true", default=False)
+    parser.add_argument("--evaluation_cutoffs", type=int, nargs="+", default=[2, 10, 50])
+    # early stopping configurations
+    parser.add_argument("--early_stopping", action="store_true", default=False)
+    parser.add_argument("--early_stopping_monitor", type=str, default="test_recall@10")
+    parser.add_argument("--early_stopping_mode", type=str, default="max")
+    parser.add_argument("--early_stopping_patience", type=int, default=0)
     parser.add_argument("--random_seed", type=int, default=42)
-
 
     args = parser.parse_args()
     config = vars(args)
