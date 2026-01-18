@@ -22,7 +22,7 @@ def main(**config):
     # Initialize Run Configurations
     wandb.init(project=PROJECT_NAME, config=config if config else None)
     config = dict(wandb.config)
-    print(f"{'='*10} Run Configs {'='*20}")
+    print(f"{'='*10} Run Configs {'='*25}")
     pprint.pprint(config)
     print(f"{'='*48}")
 
@@ -57,7 +57,7 @@ def main(**config):
             "item_id": test_user_interaction["item_id"].values
         }
     )
-    print(f"{'='*10} Dataset Summary {'='*20}")
+    print(f"{'='*10} Dataset Summary {'='*21}")
     print(f"Training Dataset: {len(train_dataset)}")
     print(f"Test Dataset: {len(test_dataset)}")
     pprint.pprint(filter_vocabulary(train_features_meta))
@@ -113,9 +113,9 @@ def main(**config):
 
     wandb.finish()
 
-    print(f"{'='*10} Final Results {'='*10}")
+    print(f"{'='*10} Final Results {'='*24}")
     pprint.pprint(results)
-    print(f"{'='*30}")
+    print(f"{'='*48}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
