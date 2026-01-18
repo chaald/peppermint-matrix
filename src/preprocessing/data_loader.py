@@ -2,7 +2,7 @@ import pandas as pd
 
 from typing import Tuple, Dict
 
-def load_data(file_path:str) -> Tuple[pd.DataFrame, Dict]:
+def load_data(file_path:str) -> pd.DataFrame:
     user_array = []
     item_array = []
     user_items = {}
@@ -24,6 +24,6 @@ def load_data(file_path:str) -> Tuple[pd.DataFrame, Dict]:
         "item_id": item_array
     })
 
-    return user_iteraction, user_items
+    return user_iteraction
 
 
