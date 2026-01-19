@@ -145,6 +145,9 @@ class MatrixFactorization(keras.Model):
             loss_values.append(loss_value)
         total_loss = tf.reduce_sum(loss_values)
 
+        regularization_loss = tf.reduce_sum(self.losses)
+        total_loss = total_loss + regularization_loss
+
         return total_loss
     
     def fit(
