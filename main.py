@@ -74,15 +74,15 @@ def main(**config):
     if config["model"] == "matrix_factorization":
         model = MatrixFactorization(
             train_features_meta, 
-            embedding_dimension_count=64,
-            l2_regularization=1e-6,
+            embedding_dimension_count=config["embedding_dimension"],
+            l2_regularization=config["l2_regularization"],
             evaluation_cutoffs=config["evaluation_cutoffs"]
         )
     else:
         raise ValueError(f"Unknown model type: {config['model']}")
 
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=0.01),
+        optimizer=keras.optimizers.Adam(learning_rate=config["learning_rate"]),
         loss_functions=[
             BayesianPersonalizedRankingLoss()
         ],
@@ -130,11 +130,15 @@ def main(**config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    # model configuration
     parser.add_argument("--model", type=str, default="matrix_factorization")
+    parser.add_argument("--embedding_dimension", type=int, default=64)
     # training configurations
     parser.add_argument("--max_epoch", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=16384)
     parser.add_argument("--shuffle", action="store_true", default=False)
+    parser.add_argument("--learning_rate", type=float, default=0.01)
+    parser.add_argument("--l2_regularization", type=float, default=1e-6)
     # tracking configurations
     parser.add_argument("--log_freq", type=str, default="epoch")
     parser.add_argument("--evaluation_cutoffs", type=int, nargs="+", default=[2, 10, 50])
