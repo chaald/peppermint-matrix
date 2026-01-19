@@ -11,7 +11,7 @@ import pprint
 from wandb.integration.keras import WandbMetricsLogger
 
 from src.constant import PROJECT_NAME
-from src.utils import filter_vocabulary
+from src.utils import filter_vocabulary, read_yaml, store_yaml, load_config
 from src.preprocessing import construct_features_meta
 from src.preprocessing.data_loader import load_data
 from src.sampler import BayesianSampler
@@ -122,34 +122,50 @@ def main(**config):
     pprint.pprint(results)
     print(f"{'='*48}")
 
-    print(model.weights)
-
     # Save the model
     model.save(os.path.join(base_path, "model.keras"))
+    store_yaml(config, os.path.join(base_path, "config.yaml"))
     print(f"Model saved to {os.path.join(base_path, 'model.keras')}")
+
+def compile_config(args):
+    # Load Default Config, priority 3
+    config = load_config("configs/default.yaml")
+
+    # Load Config File, priority 2
+    loaded_config = load_config(args.config) if args.config is not None else {}
+    config.update(loaded_config)
+
+    # Override with CLI Arguments, priority 1
+    for key, value in vars(args).items():
+        if (value is not None and not isinstance(value, bool)) or (isinstance(value, bool) and value == True):
+            config[key] = value
+
+    return config
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # model configuration
-    parser.add_argument("--model", type=str, default="matrix_factorization")
-    parser.add_argument("--embedding_dimension", type=int, default=64)
-    # training configurations
-    parser.add_argument("--max_epoch", type=int, default=50)
-    parser.add_argument("--batch_size", type=int, default=16384)
+    # Config file
+    parser.add_argument("--config", type=str, default=None, help="Path to the YAML configuration file.")
+    # Model configuration
+    parser.add_argument("--model", type=str, default=None)
+    parser.add_argument("--embedding_dimension", type=int, default=None)
+    # Training configurations
+    parser.add_argument("--max_epoch", type=int, default=None)
+    parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--shuffle", action="store_true", default=False)
-    parser.add_argument("--learning_rate", type=float, default=0.01)
-    parser.add_argument("--l2_regularization", type=float, default=1e-6)
-    # tracking configurations
-    parser.add_argument("--log_freq", type=str, default="epoch")
-    parser.add_argument("--evaluation_cutoffs", type=int, nargs="+", default=[2, 10, 50])
-    # early stopping configurations
+    parser.add_argument("--learning_rate", type=float, default=None)
+    parser.add_argument("--l2_regularization", type=float, default=None)
+    # Tracking configurations
+    parser.add_argument("--log_freq", type=str, default=None)
+    parser.add_argument("--evaluation_cutoffs", type=int, nargs="+", default=None)
+    # Early stopping configurations
     parser.add_argument("--early_stopping", action="store_true", default=False)
-    parser.add_argument("--early_stopping_monitor", type=str, default="test_recall@10")
-    parser.add_argument("--early_stopping_mode", type=str, default="max")
-    parser.add_argument("--early_stopping_patience", type=int, default=0)
-    parser.add_argument("--random_seed", type=int, default=42)
+    parser.add_argument("--early_stopping_monitor", type=str, default=None)
+    parser.add_argument("--early_stopping_mode", type=str, default=None)
+    parser.add_argument("--early_stopping_patience", type=int, default=None)
+    parser.add_argument("--random_seed", type=int, default=None)
 
     args = parser.parse_args()
-    config = vars(args)
+    config = compile_config(args)
 
     main(**config)
