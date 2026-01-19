@@ -20,6 +20,10 @@ from src.models.matrix_factorization import MatrixFactorization
 
 def main(**config):
     # Initialize Run Configurations
+    if config and "log_freq" in config:
+        config["log_freq"] = int(config["log_freq"]) if str(config["log_freq"]).isdigit() else config["log_freq"]
+    
+    # Initialize Trackers
     wandb.init(project=PROJECT_NAME, config=config if config else None)
     config = dict(wandb.config)
     print(f"{'='*10} Run Configs {'='*25}")
@@ -99,7 +103,7 @@ def main(**config):
         )
     callbacks.append(
         WandbMetricsLogger(
-            log_freq="epoch",
+            log_freq=config["log_freq"],
         )
     )
 
@@ -125,6 +129,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_epoch", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=16384)
     parser.add_argument("--shuffle", action="store_true", default=False)
+    # tracking configurations
+    parser.add_argument("--log_freq", type=str, default="epoch")
     parser.add_argument("--evaluation_cutoffs", type=int, nargs="+", default=[2, 10, 50])
     # early stopping configurations
     parser.add_argument("--early_stopping", action="store_true", default=False)
