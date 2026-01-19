@@ -9,5 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
+# Model binaries
+models/
+
 # WandB files
 wandb/

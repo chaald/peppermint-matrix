@@ -22,16 +22,25 @@ class MatrixFactorization(keras.Model):
         features_meta: FeatureMeta,
         embedding_dimension_count: int, 
         l1_regularization: float = 0.0, 
-        l2_regularization: float = 0.0
+        l2_regularization: float = 0.0,
+        evaluation_cutoffs: list = [2, 10, 50],
+        **kwargs
     ):
-        super(MatrixFactorization, self).__init__()
+        super(MatrixFactorization, self).__init__(**kwargs)
+        self.features_meta = features_meta
+        self.embedding_dimension_count = embedding_dimension_count
+        self.l1_regularization = l1_regularization
+        self.l2_regularization = l2_regularization
+        self.evaluation_cutoffs = evaluation_cutoffs
 
         # Lookup Layers
         self.user_lookup_layer = keras.layers.IntegerLookup(
             vocabulary=features_meta["user_id"]["vocabulary"],
+            name="user_lookup_layer"
         )
         self.item_lookup_layer = keras.layers.IntegerLookup(
             vocabulary=features_meta["item_id"]["vocabulary"],
+            name="item_lookup_layer"
         )
 
         # Embedding Layers
@@ -39,27 +48,16 @@ class MatrixFactorization(keras.Model):
             input_dim=features_meta["user_id"]["unique_count"] + 1,
             output_dim=embedding_dimension_count,
             embeddings_initializer='uniform',
-            embeddings_regularizer=keras.regularizers.l1_l2(l1=l1_regularization, l2=l2_regularization)
+            embeddings_regularizer=keras.regularizers.l1_l2(l1=l1_regularization, l2=l2_regularization),
+            name="user_embedding_layer"
         )
         self.item_embedding_layer = keras.layers.Embedding(
             input_dim=features_meta["item_id"]["unique_count"] + 1,
             output_dim=embedding_dimension_count,
             embeddings_initializer='uniform',
-            embeddings_regularizer=keras.regularizers.l1_l2(l1=l1_regularization, l2=l2_regularization)
+            embeddings_regularizer=keras.regularizers.l1_l2(l1=l1_regularization, l2=l2_regularization),
+            name="item_embedding_layer"
         )
-
-    def compile(
-        self, 
-        optimizer: keras.optimizers.Optimizer,
-        loss_functions: Union[keras.losses.Loss, Iterable[keras.losses.Loss]],
-        sampler: BayesianSampler,
-        evaluation_cutoffs: list = [2, 10, 50],
-        **kwargs
-    ):
-        self.optimizer = optimizer
-        self.loss_functions = loss_functions
-        self.sampler = sampler
-        self.evaluation_cutoffs = evaluation_cutoffs
 
         # Loss & Metrics Tracker
         self.train_loss_tracker = keras.metrics.Mean(name="train_loss")
@@ -94,6 +92,26 @@ class MatrixFactorization(keras.Model):
             self.test_hitrate_history[k] = []
             self.test_recall_history[k] = []
             self.test_precision_history[k] = []
+
+        # Build the model, if not already built
+        user_ids = tf.constant(self.features_meta["user_id"]["vocabulary"][:8])
+        item_ids = tf.constant(self.features_meta["item_id"]["vocabulary"][:8])
+        self(user_ids, item_ids)
+
+    def compile(
+        self, 
+        optimizer: keras.optimizers.Optimizer,
+        loss_functions: Union[keras.losses.Loss, Iterable[keras.losses.Loss]],
+        sampler: BayesianSampler,
+        **kwargs
+    ):
+        self.optimizer = optimizer
+        self.loss_functions = loss_functions
+        self.sampler = sampler
+
+        # Interaction History
+        self.train_interaction_history = []
+        self.test_interaction_history = []
 
     def call(self, user_ids: tf.Tensor, item_ids: tf.Tensor) -> tf.Tensor:
         user_embedding = self.user_embedding(user_ids)
@@ -270,11 +288,23 @@ class MatrixFactorization(keras.Model):
             
     def evaluate(
         self,
+        train_dataset: tf.data.Dataset = None,
+        test_dataset: tf.data.Dataset = None,
         batch_size: int = 128,
         describe: str = "",
     ):
-        train_interaction_matrix = self.construct_interaction_matrix(self.train_interaction_history)
-        if len(self.test_interaction_history): test_interaction_matrix = self.construct_interaction_matrix(self.test_interaction_history)
+        if train_dataset is not None:
+            train_interaction_matrix = self.construct_interaction_matrix(self.construct_interaction_history(train_dataset))
+        else:
+            train_interaction_matrix = self.construct_interaction_matrix(self.train_interaction_history)
+
+        if test_dataset is not None:
+            test_interaction_matrix = self.construct_interaction_matrix(self.construct_interaction_history(test_dataset))
+        elif len(self.test_interaction_history) > 0:
+            test_interaction_matrix = self.construct_interaction_matrix(self.test_interaction_history)
+        else:
+            test_interaction_matrix = None
+            
         user_candidates = tf.constant(self.user_lookup_layer.get_vocabulary()[1:], dtype=tf.int64)
         item_candidates = tf.constant(self.item_lookup_layer.get_vocabulary(), dtype=tf.int64)
         user_dataset = tf.data.Dataset.from_tensor_slices(user_candidates)
@@ -314,7 +344,7 @@ class MatrixFactorization(keras.Model):
                     })
 
                 # Test Metrics
-                if len(self.test_interaction_history):
+                if test_interaction_matrix is not None:
                     # mask train interactions
                     ranking_mask = tf.where(train_ground_truth==1, float('inf'), 0.0)
                     # predicted_test_rankings = tf.argsort(tf.argsort((predicted_scores - ranking_mask), direction='DESCENDING', axis=-1), axis=-1) + 1
@@ -355,6 +385,21 @@ class MatrixFactorization(keras.Model):
                 self.test_precision_history[k].append(float(self.test_precision_tracker[k].result()))
 
         return metrics_aggregate
+    
+    def construct_interaction_history(
+        self,
+        dataset: tf.data.Dataset,
+    ):
+        interaction_history = []
+        for step, batch in enumerate(dataset):
+            user_ids = batch["user_id"]
+            item_ids = batch["item_id"]
+            user_indices = self.user_lookup_layer(user_ids)
+            item_indices = self.item_lookup_layer(item_ids)
+            interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
+        
+        interaction_history = tf.concat(interaction_history, axis=0)
+        return interaction_history
 
     def construct_interaction_matrix(
         self,
@@ -367,5 +412,17 @@ class MatrixFactorization(keras.Model):
         )
 
         return tf.sparse.reorder(interaction_matrix)
-            
+    
+    def get_config(self):
+        config: Dict[str, object] = super(MatrixFactorization, self).get_config()
+
+        config.update({
+            "features_meta": self.features_meta,
+            "embedding_dimension_count": self.embedding_dimension_count,
+            "l1_regularization": self.l1_regularization,
+            "l2_regularization": self.l2_regularization,
+            "evaluation_cutoffs": self.evaluation_cutoffs
+        })
+
+        return config
         

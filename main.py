@@ -75,7 +75,8 @@ def main(**config):
         model = MatrixFactorization(
             train_features_meta, 
             embedding_dimension_count=64,
-            l2_regularization=1e-6
+            l2_regularization=1e-6,
+            evaluation_cutoffs=config["evaluation_cutoffs"]
         )
     else:
         raise ValueError(f"Unknown model type: {config['model']}")
@@ -86,7 +87,6 @@ def main(**config):
             BayesianPersonalizedRankingLoss()
         ],
         sampler=sampler,
-        evaluation_cutoffs=config["evaluation_cutoffs"]
     )
 
     # C. Model Training
@@ -121,6 +121,12 @@ def main(**config):
     print(f"{'='*10} Final Results {'='*24}")
     pprint.pprint(results)
     print(f"{'='*48}")
+
+    print(model.weights)
+
+    # Save the model
+    model.save(os.path.join(base_path, "model.keras"))
+    print(f"Model saved to {os.path.join(base_path, 'model.keras')}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
