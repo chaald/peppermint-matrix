@@ -8,7 +8,7 @@ def store_json(data, filepath):
     with open(filepath, "w") as file:
         json.dump(data, file, indent=4)
 
-def read_json(filepath) -> Dict:
+def load_json(filepath) -> Dict:
     with open(filepath, 'r') as file:
         data = json.load(file)
     
@@ -18,7 +18,7 @@ def store_yaml(data, filepath):
     with open(filepath, "w") as file:
         yaml.dump(data, file)
 
-def read_yaml(filepath) -> Dict:
+def load_yaml(filepath) -> Dict:
     with open(filepath, 'r') as file:
         data = yaml.safe_load(file)
     
@@ -36,7 +36,7 @@ def load_config(config_path: str) -> Dict:
     """
     single_run_config = {}
     
-    config = read_yaml(config_path)
+    config = load_yaml(config_path)
     if "parameters" in config:
         for parameter, parameter_config in config["parameters"].items():
 

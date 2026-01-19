@@ -11,7 +11,7 @@ import pprint
 from wandb.integration.keras import WandbMetricsLogger
 
 from src.constant import PROJECT_NAME
-from src.utils import filter_vocabulary, read_yaml, store_yaml, load_config
+from src.utils import filter_vocabulary, load_yaml, store_yaml, load_config
 from src.preprocessing import construct_features_meta
 from src.preprocessing.data_loader import load_data
 from src.sampler import BayesianSampler
