@@ -65,16 +65,28 @@ class MatrixFactorization(keras.Model):
         self.train_hitrate_tracker: Dict[int, keras.metrics.Mean] = dict()
         self.train_recall_tracker: Dict[int, keras.metrics.Mean] = dict()
         self.train_precision_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.train_map_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.train_ndcg_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.train_mrr_tracker: Dict[int, keras.metrics.Mean] = dict()
         self.test_hitrate_tracker: Dict[int, keras.metrics.Mean] = dict()
         self.test_recall_tracker: Dict[int, keras.metrics.Mean] = dict()
         self.test_precision_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.test_map_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.test_ndcg_tracker: Dict[int, keras.metrics.Mean] = dict()
+        self.test_mrr_tracker: Dict[int, keras.metrics.Mean] = dict()
         for k in evaluation_cutoffs:
             self.train_hitrate_tracker[k] = keras.metrics.Mean(name=f"train_hitrate@{k}")
             self.train_recall_tracker[k] = keras.metrics.Mean(name=f"train_recall@{k}")
             self.train_precision_tracker[k] = keras.metrics.Mean(name=f"train_precision@{k}")
+            self.train_map_tracker[k] = keras.metrics.Mean(name=f"train_map@{k}")
+            self.train_ndcg_tracker[k] = keras.metrics.Mean(name=f"train_ndcg@{k}")
+            self.train_mrr_tracker[k] = keras.metrics.Mean(name=f"train_mrr@{k}")
             self.test_hitrate_tracker[k] = keras.metrics.Mean(name=f"test_hitrate@{k}")
             self.test_recall_tracker[k] = keras.metrics.Mean(name=f"test_recall@{k}")
             self.test_precision_tracker[k] = keras.metrics.Mean(name=f"test_precision@{k}")
+            self.test_map_tracker[k] = keras.metrics.Mean(name=f"test_map@{k}")
+            self.test_ndcg_tracker[k] = keras.metrics.Mean(name=f"test_ndcg@{k}")
+            self.test_mrr_tracker[k] = keras.metrics.Mean(name=f"test_mrr@{k}")
 
         # Loss & Metrics History
         self.train_loss_history = []
@@ -82,16 +94,28 @@ class MatrixFactorization(keras.Model):
         self.train_hitrate_history: Dict[int, List[float]] = dict()
         self.train_recall_history: Dict[int, List[float]] = dict()
         self.train_precision_history: Dict[int, List[float]] = dict()
+        self.train_map_history: Dict[int, List[float]] = dict()
+        self.train_ndcg_history: Dict[int, List[float]] = dict()
+        self.train_mrr_history: Dict[int, List[float]] = dict()
         self.test_hitrate_history: Dict[int, List[float]] = dict()
         self.test_recall_history: Dict[int, List[float]] = dict()
         self.test_precision_history: Dict[int, List[float]] = dict()
+        self.test_map_history: Dict[int, List[float]] = dict()
+        self.test_ndcg_history: Dict[int, List[float]] = dict()
+        self.test_mrr_history: Dict[int, List[float]] = dict()
         for k in evaluation_cutoffs:
             self.train_hitrate_history[k] = []
             self.train_recall_history[k] = []
             self.train_precision_history[k] = []
+            self.train_map_history[k] = []
+            self.train_ndcg_history[k] = []
+            self.train_mrr_history[k] = []
             self.test_hitrate_history[k] = []
             self.test_recall_history[k] = []
             self.test_precision_history[k] = []
+            self.test_map_history[k] = []
+            self.test_ndcg_history[k] = []
+            self.test_mrr_history[k] = []
 
         # Build the model, if not already built
         user_ids = tf.constant(self.features_meta["user_id"]["vocabulary"][:8])
@@ -328,23 +352,51 @@ class MatrixFactorization(keras.Model):
                 train_ground_truth = gather_dense(train_interaction_matrix, user_indices)
                 train_actual_positive_count = tf.reduce_sum(train_ground_truth, axis=-1) # actual positives per user
                 for k in sorted(self.evaluation_cutoffs, reverse=True):
+                    positions = tf.range(k, dtype=tf.float32) # [K]
                     predicted_train_indices_k = predicted_train_indices[:, :k]
                     # train_true_positives = tf.cast((predicted_train_rankings <= k) * train_ground_truth, tf.int32)
                     # train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true_positives per user
                     train_true_positives = tf.gather(train_ground_truth, predicted_train_indices_k, batch_dims=-1) # this is equivalent to the commented lines above
                     train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1)
 
-                    train_hit = tf.cast(train_true_positive_count > 0, tf.float32)
-                    train_recall = tf.math.divide_no_nan(train_true_positive_count, train_actual_positive_count)
-                    train_precision = tf.math.divide_no_nan(train_true_positive_count, k)
+                    # Hit Rate@k
+                    train_hit = tf.cast(train_true_positive_count > 0, tf.float32) # [B]
+                    # Recall@k
+                    train_recall = tf.math.divide_no_nan(train_true_positive_count, train_actual_positive_count) # [B]
+                    # Precision@k
+                    train_precision = tf.math.divide_no_nan(train_true_positive_count, k) # [B]
+                    # MAP@k
+                    train_map = tf.math.divide_no_nan(
+                        tf.reduce_sum(
+                            (tf.cumsum(train_true_positives, axis=-1) / (positions + 1)) 
+                            * train_true_positives, 
+                            axis=-1
+                        ), 
+                        train_true_positive_count
+                    ) # [B]
+                    # NDCG@k
+                    log_discount = tf.math.log(positions + 2) / tf.math.log(2.0) # [K]
+                    train_dcg = tf.reduce_sum(train_true_positives / log_discount, axis=-1) # [B]
+                    train_ideal_true_positives = tf.cast(positions[tf.newaxis, :] < train_true_positive_count[:, tf.newaxis], tf.float32) # [B, K]
+                    train_idcg = tf.reduce_sum(train_ideal_true_positives / log_discount, axis=-1) # [B]
+                    train_ndcg = tf.math.divide_no_nan(train_dcg, train_idcg) # [B]
+                    # MRR@k
+                    train_reciprocal_ranks = 1 / tf.reduce_min(tf.where(train_true_positives==1, train_true_positives * (positions + 1), float('inf')), axis=-1) # [B]
 
+                    # Update Metrics Tracker
                     self.train_hitrate_tracker[k].update_state(train_hit)
                     self.train_recall_tracker[k].update_state(train_recall)
                     self.train_precision_tracker[k].update_state(train_precision)
+                    self.train_map_tracker[k].update_state(train_map)
+                    self.train_ndcg_tracker[k].update_state(train_ndcg)
+                    self.train_mrr_tracker[k].update_state(train_reciprocal_ranks)
                     metrics_aggregate.update({
                         f"hitrate@{k}": float(self.train_hitrate_tracker[k].result()),
                         f"recall@{k}": float(self.train_recall_tracker[k].result()),
-                        f"precision@{k}": float(self.train_precision_tracker[k].result())
+                        f"precision@{k}": float(self.train_precision_tracker[k].result()),
+                        f"map@{k}": float(self.train_map_tracker[k].result()),
+                        f"ndcg@{k}": float(self.train_ndcg_tracker[k].result()),
+                        f"mrr@{k}": float(self.train_mrr_tracker[k].result())
                     })
 
                 # Test Metrics
@@ -357,23 +409,50 @@ class MatrixFactorization(keras.Model):
                     test_ground_truth = gather_dense(test_interaction_matrix, user_indices)
                     test_actual_positive_count = tf.reduce_sum(test_ground_truth, axis=-1) # actual positives per user
                     for k in sorted(self.evaluation_cutoffs, reverse=True):
+                        positions = tf.range(k, dtype=tf.float32) # [K]
                         predicted_test_indices_k = predicted_test_indices[:, :k]
                         # test_true_positives = tf.cast((predicted_test_rankings <= k) * test_ground_truth, tf.int32)
                         # test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true_positives per user
                         test_true_positives = tf.gather(test_ground_truth, predicted_test_indices_k, batch_dims=-1) # this is equivalent to the commented lines above
                         test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1)
 
-                        test_hit = tf.cast(test_true_positive_count > 0, tf.float32)
-                        test_recall = tf.math.divide_no_nan(test_true_positive_count, test_actual_positive_count)
-                        test_precision = tf.math.divide_no_nan(test_true_positive_count, k)
-
+                        # Hit Rate@k
+                        test_hit = tf.cast(test_true_positive_count > 0, tf.float32) # [B]
+                        # Recall@k
+                        test_recall = tf.math.divide_no_nan(test_true_positive_count, test_actual_positive_count) # [B]
+                        # Precision@k
+                        test_precision = tf.math.divide_no_nan(test_true_positive_count, k) # [B]
+                        # MAP@k
+                        test_map = tf.math.divide_no_nan(
+                            tf.reduce_sum(
+                                (tf.cumsum(test_true_positives, axis=-1) / (positions + 1)) 
+                                * test_true_positives, 
+                                axis=-1
+                            ), 
+                            test_true_positive_count
+                        ) # [B]
+                        # NDCG@k
+                        log_discount = tf.math.log(positions + 2) / tf.math.log(2.0) # [K]
+                        test_dcg = tf.reduce_sum(test_true_positives / log_discount, axis=-1) # [B]
+                        test_ideal_true_positives = tf.cast(positions[tf.newaxis, :] < test_true_positive_count[:, tf.newaxis], tf.float32) # [B, K]
+                        test_idcg = tf.reduce_sum(test_ideal_true_positives / log_discount, axis=-1) # [B]
+                        test_ndcg = tf.math.divide_no_nan(test_dcg, test_idcg) # [B]
+                        # MRR@k
+                        test_reciprocal_ranks = 1 / tf.reduce_min(tf.where(test_true_positives==1, test_true_positives * (positions + 1), float('inf')), axis=-1) # [B]
+ 
                         self.test_hitrate_tracker[k].update_state(test_hit)
                         self.test_recall_tracker[k].update_state(test_recall)
                         self.test_precision_tracker[k].update_state(test_precision)
+                        self.test_map_tracker[k].update_state(test_map)
+                        self.test_ndcg_tracker[k].update_state(test_ndcg)
+                        self.test_mrr_tracker[k].update_state(test_reciprocal_ranks)
                         metrics_aggregate.update({
                             f"test_hitrate@{k}": float(self.test_hitrate_tracker[k].result()),
                             f"test_recall@{k}": float(self.test_recall_tracker[k].result()),
-                            f"test_precision@{k}": float(self.test_precision_tracker[k].result())
+                            f"test_precision@{k}": float(self.test_precision_tracker[k].result()),
+                            f"test_map@{k}": float(self.test_map_tracker[k].result()),
+                            f"test_ndcg@{k}": float(self.test_ndcg_tracker[k].result()),
+                            f"test_mrr@{k}": float(self.test_mrr_tracker[k].result())
                         })
         
                 pbar.update(len(user_batch))
@@ -384,6 +463,9 @@ class MatrixFactorization(keras.Model):
             self.train_hitrate_history[k].append(float(self.train_hitrate_tracker[k].result()))
             self.train_recall_history[k].append(float(self.train_recall_tracker[k].result()))
             self.train_precision_history[k].append(float(self.train_precision_tracker[k].result()))
+            self.train_map_history[k].append(float(self.train_map_tracker[k].result()))
+            self.train_ndcg_history[k].append(float(self.train_ndcg_tracker[k].result()))
+            self.train_mrr_history[k].append(float(self.train_mrr_tracker[k].result()))
             if len(self.test_interaction_history):
                 self.test_hitrate_history[k].append(float(self.test_hitrate_tracker[k].result()))
                 self.test_recall_history[k].append(float(self.test_recall_tracker[k].result()))
@@ -409,10 +491,11 @@ class MatrixFactorization(keras.Model):
     def construct_interaction_matrix(
         self,
         interaction_history: tf.Tensor,
+        dtype: tf.dtypes.DType = tf.float32
     ) -> tf.sparse.SparseTensor:
         interaction_matrix = tf.sparse.SparseTensor(
             indices=interaction_history,
-            values=tf.ones(shape=(len(interaction_history),), dtype=tf.int32),
+            values=tf.ones(shape=(len(interaction_history),), dtype=dtype),
             dense_shape=(self.user_lookup_layer.vocabulary_size(), self.item_lookup_layer.vocabulary_size())
         )
 

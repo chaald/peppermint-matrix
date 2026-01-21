@@ -8,7 +8,7 @@ parameters:
     value: matrix_factorization
   embedding_dimension:
     distribution: constant
-    value: 16
+    value: 64
   
   # Training configurations
   max_epoch:
@@ -16,7 +16,7 @@ parameters:
   batch_size:
     value: 16384
   shuffle:
-    value: false
+    value: true
   learning_rate:
     value: 0.01
   l2_regularization:
@@ -41,6 +41,7 @@ parameters:
 
   # Random Seed
   random_seed:
-    distribution: categorical
-    values: [57, 123, 2024, 171, 7]
+    distribution: int_uniform
+    min: 1
+    max: 16384
   
