@@ -33,12 +33,7 @@ def main(**config):
     # Set random seeds for reproducibility
     random.seed(config["random_seed"])
     np.random.seed(config["random_seed"])
-    tf.random.set_seed(config["random_seed"])
-
-    # Create base folder for this run
-    sweep_id = wandb.run.sweep_id if wandb.run.sweep_id else "single_runs"
-    base_path = f"models/{config['model']}/{sweep_id}/{wandb.run.id}"
-    os.makedirs(base_path, exist_ok=True)
+    tf.random.set_seed(config["random_seed"])    
 
     # A. Load and preprocess data
     train_user_interaction = load_data("dataset/yelp2018/train.txt")
@@ -124,6 +119,10 @@ def main(**config):
 
     # Save the model
     if config["store_model"]:
+        sweep_id = wandb.run.sweep_id if wandb.run.sweep_id else "single_runs"
+        base_path = f"models/{config['model']}/{sweep_id}/{wandb.run.id}"
+        os.makedirs(base_path, exist_ok=True)
+
         model.save(os.path.join(base_path, "model.keras"))
         store_yaml(config, os.path.join(base_path, "config.yaml"))
         print(f"Model saved to {os.path.join(base_path, 'model.keras')}")
