@@ -252,7 +252,7 @@ class MatrixFactorization(keras.Model):
                     user_indices = self.user_lookup_layer(user_ids)
                     item_indices = self.item_lookup_layer(item_ids)
                     self.train_interaction_history.append(tf.stack([user_indices, item_indices], axis=-1))
-                    metrics_aggregate.update({"loss": float(self.train_loss_tracker.result()), "step_delta": len(user_ids)})
+                    metrics_aggregate.update({"train_loss": float(self.train_loss_tracker.result()), "step_delta": len(user_ids)})
 
                     callbacks.on_train_batch_end(step, metrics_aggregate)
                     pbar.update(len(user_ids))
@@ -391,12 +391,12 @@ class MatrixFactorization(keras.Model):
                     self.train_ndcg_tracker[k].update_state(train_ndcg)
                     self.train_mrr_tracker[k].update_state(train_reciprocal_ranks)
                     metrics_aggregate.update({
-                        f"hitrate@{k}": float(self.train_hitrate_tracker[k].result()),
-                        f"recall@{k}": float(self.train_recall_tracker[k].result()),
-                        f"precision@{k}": float(self.train_precision_tracker[k].result()),
-                        f"map@{k}": float(self.train_map_tracker[k].result()),
-                        f"ndcg@{k}": float(self.train_ndcg_tracker[k].result()),
-                        f"mrr@{k}": float(self.train_mrr_tracker[k].result())
+                        f"train_hitrate@{k}": float(self.train_hitrate_tracker[k].result()),
+                        f"train_recall@{k}": float(self.train_recall_tracker[k].result()),
+                        f"train_precision@{k}": float(self.train_precision_tracker[k].result()),
+                        f"train_map@{k}": float(self.train_map_tracker[k].result()),
+                        f"train_ndcg@{k}": float(self.train_ndcg_tracker[k].result()),
+                        f"train_mrr@{k}": float(self.train_mrr_tracker[k].result())
                     })
 
                 # Test Metrics

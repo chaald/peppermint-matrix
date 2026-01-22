@@ -16,7 +16,8 @@ parameters:
   batch_size:
     value: 16384
   shuffle:
-    value: true
+    distribution: categorical
+    values: [true, false]
   learning_rate:
     value: 0.01
   l2_regularization:
