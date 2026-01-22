@@ -39,7 +39,9 @@ parameters:
   early_stopping_patience:
     value: 0
 
-  # Random Seed
+  # Utilities
   random_seed:
     value: 42
+  store_model:
+    value: false
   

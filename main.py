@@ -123,9 +123,10 @@ def main(**config):
     print(f"{'='*48}")
 
     # Save the model
-    model.save(os.path.join(base_path, "model.keras"))
-    store_yaml(config, os.path.join(base_path, "config.yaml"))
-    print(f"Model saved to {os.path.join(base_path, 'model.keras')}")
+    if config["store_model"]:
+        model.save(os.path.join(base_path, "model.keras"))
+        store_yaml(config, os.path.join(base_path, "config.yaml"))
+        print(f"Model saved to {os.path.join(base_path, 'model.keras')}")
 
 def compile_config(args):
     # Load Default Config, priority 3
@@ -163,7 +164,9 @@ if __name__ == "__main__":
     parser.add_argument("--early_stopping_monitor", type=str, default=None)
     parser.add_argument("--early_stopping_mode", type=str, default=None)
     parser.add_argument("--early_stopping_patience", type=int, default=None)
+    # Utilities
     parser.add_argument("--random_seed", type=int, default=None)
+    parser.add_argument("--store_model", action="store_true", default=False)
 
     args = parser.parse_args()
     config = compile_config(args)

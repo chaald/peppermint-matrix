@@ -40,9 +40,11 @@ parameters:
   early_stopping_patience:
     value: 0
 
-  # Random Seed
+  # Utilities
   random_seed:
     distribution: int_uniform
     min: 1
     max: 16384
+  store_model:
+    value: false
   
