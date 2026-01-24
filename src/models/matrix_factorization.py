@@ -354,151 +354,19 @@ class MatrixFactorization(keras.Model):
                 candidate_item_embedding = self.item_embedding(item_candidates) # [I, D]
                 predicted_scores = tf.matmul(user_embedding, tf.transpose(candidate_item_embedding)) # [B, I]
 
-                # Get Top-K recommended items and scores
-                # predicted_train_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item | B*Ilog(I)
-                sorted_train_scores, predicted_train_indices = tf.math.top_k(predicted_scores, k=maxk) # partition + partial sort gives you faster result  | B*(I + klog(k)), k << I | [B, K]
-
-                # Train Metrics
-                train_ground_truth = gather_dense(train_interaction_matrix, user_indices) # gather([U, I], [B]) -> [B, I]
-                train_actual_positive_count = tf.reduce_sum(train_ground_truth, axis=-1) # actual positives per user (TP + FN) | [B] 
-                for k in sorted(self.evaluation_cutoffs, reverse=True):
-                    positions = tf.range(k, dtype=tf.float32) # [K]
-                    predicted_train_indices_k = predicted_train_indices[:, :k] # [B, K]
-                    # train_true_positives = tf.cast((predicted_train_rankings <= k) * train_ground_truth, tf.int32)
-                    # train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true_positives per user
-                    train_true_positives = tf.gather(train_ground_truth, predicted_train_indices_k, batch_dims=-1) # this is equivalent to the commented lines above | gather([B, I], [B, K]) -> [B, K]
-                    train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true positives per user (TP) | [B]
-
-                    ## Hit Rate@k
-                    # 1 if TP_u > 0 else 0
-                    train_hit = tf.cast(train_true_positive_count > 0, tf.float32) # [B]
-
-                    ## Recall@k
-                    # TP / (TP + FN) for u in U
-                    train_recall = tf.math.divide_no_nan(train_true_positive_count, train_actual_positive_count) # [B]
-
-                    ## Precision@k
-                    # TP / (TP + FP) for u in U
-                    train_precision = tf.math.divide_no_nan(train_true_positive_count, k) # [B]
-
-                    ## MAP@k
-                    # Precision(k)
-                    train_precision_at_each_position = tf.cumsum(train_true_positives, axis=-1) / (positions + 1) # [B, K]
-                    # Precision(k) * rel(k)
-                    train_precision_at_each_recall_position = train_precision_at_each_position * train_true_positives # [B, K]
-                    # Σ Precision(k) * rel(k) / total_recalled_items | total_recalled_items = TP
-                    train_average_precision = tf.math.divide_no_nan(tf.reduce_sum(train_precision_at_each_recall_position, axis=-1), train_true_positive_count) # [B]
-                    
-                    ## NDCG@k
-                    # log(k + 1, base=2)
-                    log_discount = tf.math.log(positions + 2) / tf.math.log(2.0) # [K]
-                    # Σ rel_k / log2(k + 1)
-                    train_dcg = tf.reduce_sum(train_true_positives / log_discount, axis=-1) # [B]
-                    # ideal_rel_k = 1 if k <= total_recalled_items else 0
-                    train_ideal_true_positives = tf.cast(positions[tf.newaxis, :] < train_true_positive_count[:, tf.newaxis], tf.float32) # [B, K]
-                    # Σ ideal_rel_k / log2(k + 1)
-                    train_idcg = tf.reduce_sum(train_ideal_true_positives / log_discount, axis=-1) # [B]
-                    # dcg / idcg
-                    train_ndcg = tf.math.divide_no_nan(train_dcg, train_idcg) # [B]
-                    
-                    ## MRR@k
-                    # Set non-positive positions to inf so reduce_min finds first positive
-                    train_first_positive_positions = tf.where(train_true_positives==1, train_true_positives * (positions + 1), float('inf')) # [B, K]
-                    train_reciprocal_ranks = 1 / tf.reduce_min(train_first_positive_positions, axis=-1) # [B]
-
-                    # Update Metrics Tracker
-                    self.train_hitrate_tracker[k].update_state(train_hit)
-                    self.train_recall_tracker[k].update_state(train_recall)
-                    self.train_precision_tracker[k].update_state(train_precision)
-                    self.train_map_tracker[k].update_state(train_average_precision)
-                    self.train_ndcg_tracker[k].update_state(train_ndcg)
-                    self.train_mrr_tracker[k].update_state(train_reciprocal_ranks)
-                    metrics_aggregate.update({
-                        f"train_hitrate@{k}": float(self.train_hitrate_tracker[k].result()),
-                        f"train_recall@{k}": float(self.train_recall_tracker[k].result()),
-                        f"train_precision@{k}": float(self.train_precision_tracker[k].result()),
-                        f"train_map@{k}": float(self.train_map_tracker[k].result()),
-                        f"train_ndcg@{k}": float(self.train_ndcg_tracker[k].result()),
-                        f"train_mrr@{k}": float(self.train_mrr_tracker[k].result())
-                    })
-
-                # Test Metrics
-                if test_interaction_matrix is not None:
-                    ## Train Interactions Mask
-                    # Following the original BPR paper, we only evaluate on items not seen in training set during test evaluation
-                    # Please see Section 6.2 of "BPR: Bayesian Personalized Ranking from Implicit Feedback" by Rendle et al., 2009
-                    ranking_mask = tf.where(train_ground_truth==1, float('inf'), 0.0)
-                    
-                    # Get Top-K recommended items and scores after applying train interaction mask
-                    # predicted_test_rankings = tf.argsort(tf.argsort((predicted_scores - ranking_mask), direction='DESCENDING', axis=-1), axis=-1) + 1
-                    sorted_test_scores, predicted_test_indices = tf.math.top_k(predicted_scores - ranking_mask, k=maxk) # [B, K]
-
-                    test_ground_truth = gather_dense(test_interaction_matrix, user_indices) # gather([U, I], [B]) -> [B, I]
-                    test_actual_positive_count = tf.reduce_sum(test_ground_truth, axis=-1) # actual positives per user | [B]
-                    for k in sorted(self.evaluation_cutoffs, reverse=True):
-                        positions = tf.range(k, dtype=tf.float32) # [K]
-                        predicted_test_indices_k = predicted_test_indices[:, :k] # [B, K]
-                        # test_true_positives = tf.cast((predicted_test_rankings <= k) * test_ground_truth, tf.int32)
-                        # test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true_positives per user
-                        test_true_positives = tf.gather(test_ground_truth, predicted_test_indices_k, batch_dims=-1) # this is equivalent to the commented lines above | | gather([B, I], [B, K]) -> [B, K]
-                        test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true positives per user | [B]
-
-                        ## Hit Rate@k
-                        # 1 if TP_u > 0 else 0
-                        test_hit = tf.cast(test_true_positive_count > 0, tf.float32) # [B]
-                        
-                        ## Recall@k
-                        # TP / (TP + FN) for u in U
-                        test_recall = tf.math.divide_no_nan(test_true_positive_count, test_actual_positive_count) # [B]
-                        
-                        ## Precision@k
-                        # TP / (TP + FP) for u in U
-                        test_precision = tf.math.divide_no_nan(test_true_positive_count, k) # [B]
-                        
-                        ## MAP@k
-                        # Precision(k)
-                        test_precision_at_each_position = tf.cumsum(test_true_positives, axis=-1) / (positions + 1) # [B, K]
-                        # Precision(k) * rel(k)
-                        test_precision_at_each_recall_position = test_precision_at_each_position * test_true_positives # [B, K]
-                        # Σ Precision(k) * rel(k) / total_recalled_items | total_recalled_items = TP
-                        test_average_precision = tf.math.divide_no_nan(tf.reduce_sum(test_precision_at_each_recall_position, axis=-1), test_true_positive_count) # [B]
-                        
-                        ## NDCG@k
-                        # log(k + 1, base=2)
-                        log_discount = tf.math.log(positions + 2) / tf.math.log(2.0) # [K]
-                        # Σ rel_k / log2(k + 1)
-                        test_dcg = tf.reduce_sum(test_true_positives / log_discount, axis=-1) # [B]
-                        # ideal_rel_k = 1 if k <= total_recalled_items else 0
-                        test_ideal_true_positives = tf.cast(positions[tf.newaxis, :] < test_true_positive_count[:, tf.newaxis], tf.float32) # [B, K]
-                        # Σ ideal_rel_k / log2(k + 1)
-                        test_idcg = tf.reduce_sum(test_ideal_true_positives / log_discount, axis=-1) # [B]
-                        # dcg / idcg
-                        test_ndcg = tf.math.divide_no_nan(test_dcg, test_idcg) # [B]
-                        
-                        ## MRR@k
-                        # Set non-positive positions to inf so reduce_min finds first positive
-                        test_first_positive_positions = tf.where(test_true_positives==1, test_true_positives * (positions + 1), float('inf')) # [B, K]
-                        test_reciprocal_ranks = 1 / tf.reduce_min(test_first_positive_positions, axis=-1) # [B]
- 
-                        self.test_hitrate_tracker[k].update_state(test_hit)
-                        self.test_recall_tracker[k].update_state(test_recall)
-                        self.test_precision_tracker[k].update_state(test_precision)
-                        self.test_map_tracker[k].update_state(test_average_precision)
-                        self.test_ndcg_tracker[k].update_state(test_ndcg)
-                        self.test_mrr_tracker[k].update_state(test_reciprocal_ranks)
-                        metrics_aggregate.update({
-                            f"test_hitrate@{k}": float(self.test_hitrate_tracker[k].result()),
-                            f"test_recall@{k}": float(self.test_recall_tracker[k].result()),
-                            f"test_precision@{k}": float(self.test_precision_tracker[k].result()),
-                            f"test_map@{k}": float(self.test_map_tracker[k].result()),
-                            f"test_ndcg@{k}": float(self.test_ndcg_tracker[k].result()),
-                            f"test_mrr@{k}": float(self.test_mrr_tracker[k].result())
-                        })
-        
+                self.evaluate_kernel(
+                    predicted_scores = predicted_scores,
+                    user_indices = user_indices,
+                    train_interaction_matrix = train_interaction_matrix,
+                    test_interaction_matrix = test_interaction_matrix,
+                    maxk = maxk
+                )
                 pbar.update(len(user_batch))
-                pbar.set_postfix(preprocess_metric_aggregate(metrics_aggregate))            
 
         # finalize metrics
+        for metrics in self.metrics:
+            metrics_aggregate.update({metrics.name: float(metrics.result())})
+
         for k in self.evaluation_cutoffs:
             self.train_hitrate_history[k].append(float(self.train_hitrate_tracker[k].result()))
             self.train_recall_history[k].append(float(self.train_recall_tracker[k].result()))
@@ -512,6 +380,140 @@ class MatrixFactorization(keras.Model):
                 self.test_precision_history[k].append(float(self.test_precision_tracker[k].result()))
 
         return metrics_aggregate
+
+    @tf.function(jit_compile=True) # jit compile speed up evaluation from 32s to 2s per epoch, a 16x speedup!
+    def evaluate_kernel(
+        self, 
+        user_indices: tf.Tensor,
+        predicted_scores: tf.Tensor,
+        train_interaction_matrix: tf.SparseTensor,
+        test_interaction_matrix: tf.SparseTensor,
+        maxk: int
+    ):
+        # Get Top-K recommended items and scores
+        # predicted_train_rankings = tf.argsort(tf.argsort(predicted_scores, direction='DESCENDING', axis=-1), axis=-1) + 1 # argsort twice gets you rankings of each item | B*Ilog(I)
+        sorted_train_scores, predicted_train_indices = tf.math.top_k(predicted_scores, k=maxk) # partition + partial sort gives you faster result  | B*(I + klog(k)), k << I | [B, K]
+
+        # Train Metrics
+        train_ground_truth = gather_dense(train_interaction_matrix, user_indices) # gather([U, I], [B]) -> [B, I]
+        train_actual_positive_count = tf.reduce_sum(train_ground_truth, axis=-1) # actual positives per user (TP + FN) | [B] 
+        for k in sorted(self.evaluation_cutoffs, reverse=True):
+            positions = tf.range(k, dtype=tf.float32) # [K]
+            predicted_train_indices_k = predicted_train_indices[:, :k] # [B, K]
+            # train_true_positives = tf.cast((predicted_train_rankings <= k) * train_ground_truth, tf.int32)
+            # train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true_positives per user
+            train_true_positives = tf.gather(train_ground_truth, predicted_train_indices_k, batch_dims=-1) # this is equivalent to the commented lines above | gather([B, I], [B, K]) -> [B, K]
+            train_true_positive_count = tf.reduce_sum(train_true_positives, axis=-1) # true positives per user (TP) | [B]
+
+            ## Hit Rate@k
+            # 1 if TP_u > 0 else 0
+            train_hit = tf.cast(train_true_positive_count > 0, tf.float32) # [B]
+
+            ## Recall@k
+            # TP / (TP + FN) for u in U
+            train_recall = tf.math.divide_no_nan(train_true_positive_count, train_actual_positive_count) # [B]
+
+            ## Precision@k
+            # TP / (TP + FP) for u in U
+            train_precision = tf.math.divide_no_nan(train_true_positive_count, k) # [B]
+
+            ## MAP@k
+            # Precision(k)
+            train_precision_at_each_position = tf.cumsum(train_true_positives, axis=-1) / (positions + 1) # [B, K]
+            # Precision(k) * rel(k)
+            train_precision_at_each_recall_position = train_precision_at_each_position * train_true_positives # [B, K]
+            # Σ Precision(k) * rel(k) / total_recalled_items | total_recalled_items = TP
+            train_average_precision = tf.math.divide_no_nan(tf.reduce_sum(train_precision_at_each_recall_position, axis=-1), train_true_positive_count) # [B]
+            
+            ## NDCG@k
+            # log(k + 1, base=2)
+            log_discount = tf.math.log(positions + 2) / tf.math.log(2.0) # [K]
+            # Σ rel_k / log2(k + 1)
+            train_dcg = tf.reduce_sum(train_true_positives / log_discount, axis=-1) # [B]
+            # ideal_rel_k = 1 if k <= total_recalled_items else 0
+            train_ideal_true_positives = tf.cast(positions[tf.newaxis, :] < train_true_positive_count[:, tf.newaxis], tf.float32) # [B, K]
+            # Σ ideal_rel_k / log2(k + 1)
+            train_idcg = tf.reduce_sum(train_ideal_true_positives / log_discount, axis=-1) # [B]
+            # dcg / idcg
+            train_ndcg = tf.math.divide_no_nan(train_dcg, train_idcg) # [B]
+            
+            ## MRR@k
+            # Set non-positive positions to inf so reduce_min finds first positive
+            train_first_positive_positions = tf.where(train_true_positives==1, train_true_positives * (positions + 1), float('inf')) # [B, K]
+            train_reciprocal_ranks = 1 / tf.reduce_min(train_first_positive_positions, axis=-1) # [B]
+
+            # Update Metrics Tracker
+            self.train_hitrate_tracker[k].update_state(train_hit)
+            self.train_recall_tracker[k].update_state(train_recall)
+            self.train_precision_tracker[k].update_state(train_precision)
+            self.train_map_tracker[k].update_state(train_average_precision)
+            self.train_ndcg_tracker[k].update_state(train_ndcg)
+            self.train_mrr_tracker[k].update_state(train_reciprocal_ranks)
+
+            # Test Metrics
+            if test_interaction_matrix is not None:
+                ## Train Interactions Mask
+                # Following the original BPR paper, we only evaluate on items not seen in training set during test evaluation
+                # Please see Section 6.2 of "BPR: Bayesian Personalized Ranking from Implicit Feedback" by Rendle et al., 2009
+                ranking_mask = tf.where(train_ground_truth==1, float('inf'), 0.0)
+                
+                # Get Top-K recommended items and scores after applying train interaction mask
+                # predicted_test_rankings = tf.argsort(tf.argsort((predicted_scores - ranking_mask), direction='DESCENDING', axis=-1), axis=-1) + 1
+                sorted_test_scores, predicted_test_indices = tf.math.top_k(predicted_scores - ranking_mask, k=maxk) # [B, K]
+
+                test_ground_truth = gather_dense(test_interaction_matrix, user_indices) # gather([U, I], [B]) -> [B, I]
+                test_actual_positive_count = tf.reduce_sum(test_ground_truth, axis=-1) # actual positives per user | [B]
+                for k in sorted(self.evaluation_cutoffs, reverse=True):
+                    positions = tf.range(k, dtype=tf.float32) # [K]
+                    predicted_test_indices_k = predicted_test_indices[:, :k] # [B, K]
+                    # test_true_positives = tf.cast((predicted_test_rankings <= k) * test_ground_truth, tf.int32)
+                    # test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true_positives per user
+                    test_true_positives = tf.gather(test_ground_truth, predicted_test_indices_k, batch_dims=-1) # this is equivalent to the commented lines above | | gather([B, I], [B, K]) -> [B, K]
+                    test_true_positive_count = tf.reduce_sum(test_true_positives, axis=-1) # true positives per user | [B]
+
+                    ## Hit Rate@k
+                    # 1 if TP_u > 0 else 0
+                    test_hit = tf.cast(test_true_positive_count > 0, tf.float32) # [B]
+                    
+                    ## Recall@k
+                    # TP / (TP + FN) for u in U
+                    test_recall = tf.math.divide_no_nan(test_true_positive_count, test_actual_positive_count) # [B]
+                    
+                    ## Precision@k
+                    # TP / (TP + FP) for u in U
+                    test_precision = tf.math.divide_no_nan(test_true_positive_count, k) # [B]
+                    
+                    ## MAP@k
+                    # Precision(k)
+                    test_precision_at_each_position = tf.cumsum(test_true_positives, axis=-1) / (positions + 1) # [B, K]
+                    # Precision(k) * rel(k)
+                    test_precision_at_each_recall_position = test_precision_at_each_position * test_true_positives # [B, K]
+                    # Σ Precision(k) * rel(k) / total_recalled_items | total_recalled_items = TP
+                    test_average_precision = tf.math.divide_no_nan(tf.reduce_sum(test_precision_at_each_recall_position, axis=-1), test_true_positive_count) # [B]
+                    
+                    ## NDCG@k
+                    # log(k + 1, base=2)
+                    log_discount = tf.math.log(positions + 2) / tf.math.log(2.0) # [K]
+                    # Σ rel_k / log2(k + 1)
+                    test_dcg = tf.reduce_sum(test_true_positives / log_discount, axis=-1) # [B]
+                    # ideal_rel_k = 1 if k <= total_recalled_items else 0
+                    test_ideal_true_positives = tf.cast(positions[tf.newaxis, :] < test_true_positive_count[:, tf.newaxis], tf.float32) # [B, K]
+                    # Σ ideal_rel_k / log2(k + 1)
+                    test_idcg = tf.reduce_sum(test_ideal_true_positives / log_discount, axis=-1) # [B]
+                    # dcg / idcg
+                    test_ndcg = tf.math.divide_no_nan(test_dcg, test_idcg) # [B]
+                    
+                    ## MRR@k
+                    # Set non-positive positions to inf so reduce_min finds first positive
+                    test_first_positive_positions = tf.where(test_true_positives==1, test_true_positives * (positions + 1), float('inf')) # [B, K]
+                    test_reciprocal_ranks = 1 / tf.reduce_min(test_first_positive_positions, axis=-1) # [B]
+
+                    self.test_hitrate_tracker[k].update_state(test_hit)
+                    self.test_recall_tracker[k].update_state(test_recall)
+                    self.test_precision_tracker[k].update_state(test_precision)
+                    self.test_map_tracker[k].update_state(test_average_precision)
+                    self.test_ndcg_tracker[k].update_state(test_ndcg)
+                    self.test_mrr_tracker[k].update_state(test_reciprocal_ranks)
     
     def construct_interaction_history(
         self,

@@ -18,6 +18,17 @@ from src.sampler import BayesianSampler
 from src.losses.bayesian_personalized_ranking import BayesianPersonalizedRankingLoss
 from src.models.matrix_factorization import MatrixFactorization
 
+# Set CuDNN library path for TensorFlow
+try:
+    import nvidia.cudnn
+    cudnn_path = os.path.join(nvidia.cudnn.__path__[0], "lib")
+    if "LD_LIBRARY_PATH" in os.environ:
+        os.environ["LD_LIBRARY_PATH"] = cudnn_path + ":" + os.environ["LD_LIBRARY_PATH"]
+    else:
+        os.environ["LD_LIBRARY_PATH"] = cudnn_path
+except ImportError:
+    pass
+
 def main(**config):
     # Initialize Run Configurations
     if config and "log_freq" in config:
