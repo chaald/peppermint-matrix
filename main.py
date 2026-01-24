@@ -19,15 +19,7 @@ from src.losses.bayesian_personalized_ranking import BayesianPersonalizedRanking
 from src.models.matrix_factorization import MatrixFactorization
 
 # Set CuDNN library path for TensorFlow
-try:
-    import nvidia.cudnn
-    cudnn_path = os.path.join(nvidia.cudnn.__path__[0], "lib")
-    if "LD_LIBRARY_PATH" in os.environ:
-        os.environ["LD_LIBRARY_PATH"] = cudnn_path + ":" + os.environ["LD_LIBRARY_PATH"]
-    else:
-        os.environ["LD_LIBRARY_PATH"] = cudnn_path
-except ImportError:
-    pass
+# LD_LIBRARY_PATH=$(uv run python -c "import nvidia.cudnn; print(nvidia.cudnn.__path__[0])")/lib:$LD_LIBRARY_PATH
 
 def main(**config):
     # Initialize Run Configurations
