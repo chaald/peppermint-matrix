@@ -33,3 +33,11 @@ python hyperparameter_search.py \
     --nworker=4 \
     --nruns=16
 ```
+
+# Sync Wandb Summary
+```
+python sync_wandb.py \
+    --model=matrix_factorization \
+    --sorting_criterion epoch/test_hitrate@20:0.5 epoch/test_ndcg@20:0.25 \
+    --output_path=wandb/summary.parquet
+```
