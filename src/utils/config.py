@@ -66,4 +66,9 @@ def load_config(config_path: str) -> Dict:
     else:
         single_run_config.update(config)
 
+    # Convert string scientific notation to floating point numbers
+    for key, value in single_run_config.items():
+        if isinstance(value, str) and 'e' in value.lower():
+            single_run_config[key] = float(value)
+
     return single_run_config
