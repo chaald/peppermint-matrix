@@ -11,15 +11,22 @@ import pprint
 from wandb.integration.keras import WandbMetricsLogger
 
 from src.constant import PROJECT_NAME
-from src.utils import filter_vocabulary
+from src.utils import filter_vocabulary, load_yaml, store_yaml, load_config
 from src.preprocessing import construct_features_meta
 from src.preprocessing.data_loader import load_data
 from src.sampler import BayesianSampler
 from src.losses.bayesian_personalized_ranking import BayesianPersonalizedRankingLoss
 from src.models.matrix_factorization import MatrixFactorization
 
+# Set CuDNN library path for TensorFlow
+# LD_LIBRARY_PATH=$(uv run python -c "import nvidia.cudnn; print(nvidia.cudnn.__path__[0])")/lib:$LD_LIBRARY_PATH
+
 def main(**config):
     # Initialize Run Configurations
+    if config and "log_freq" in config:
+        config["log_freq"] = int(config["log_freq"]) if str(config["log_freq"]).isdigit() else config["log_freq"]
+    
+    # Initialize Trackers
     wandb.init(project=PROJECT_NAME, config=config if config else None)
     config = dict(wandb.config)
     print(f"{'='*10} Run Configs {'='*25}")
@@ -29,12 +36,7 @@ def main(**config):
     # Set random seeds for reproducibility
     random.seed(config["random_seed"])
     np.random.seed(config["random_seed"])
-    tf.random.set_seed(config["random_seed"])
-
-    # Create base folder for this run
-    sweep_id = wandb.run.sweep_id if wandb.run.sweep_id else "single_runs"
-    base_path = f"models/{config['model']}/{sweep_id}/{wandb.run.id}"
-    os.makedirs(base_path, exist_ok=True)
+    tf.random.set_seed(config["random_seed"])    
 
     # A. Load and preprocess data
     train_user_interaction = load_data("dataset/yelp2018/train.txt")
@@ -70,19 +72,19 @@ def main(**config):
     if config["model"] == "matrix_factorization":
         model = MatrixFactorization(
             train_features_meta, 
-            embedding_dimension_count=64,
-            l2_regularization=1e-6
+            embedding_dimension_count=config["embedding_dimension"],
+            l2_regularization=config["l2_regularization"],
+            evaluation_cutoffs=config["evaluation_cutoffs"]
         )
     else:
         raise ValueError(f"Unknown model type: {config['model']}")
 
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=0.01),
+        optimizer=keras.optimizers.Adam(learning_rate=config["learning_rate"]),
         loss_functions=[
             BayesianPersonalizedRankingLoss()
         ],
         sampler=sampler,
-        evaluation_cutoffs=config["evaluation_cutoffs"]
     )
 
     # C. Model Training
@@ -99,7 +101,7 @@ def main(**config):
         )
     callbacks.append(
         WandbMetricsLogger(
-            log_freq="epoch",
+            log_freq=config["log_freq"],
         )
     )
 
@@ -118,22 +120,57 @@ def main(**config):
     pprint.pprint(results)
     print(f"{'='*48}")
 
+    # Save the model
+    if config["store_model"]:
+        sweep_id = wandb.run.sweep_id if wandb.run.sweep_id else "single_runs"
+        base_path = f"models/{config['model']}/{sweep_id}/{wandb.run.id}"
+        os.makedirs(base_path, exist_ok=True)
+
+        model.save(os.path.join(base_path, "model.keras"))
+        store_yaml(config, os.path.join(base_path, "config.yaml"))
+        print(f"Model saved to {os.path.join(base_path, 'model.keras')}")
+
+def compile_config(args):
+    # Load Default Config, priority 3
+    config = load_config("configs/default.yaml")
+
+    # Load Config File, priority 2
+    loaded_config = load_config(args.config) if args.config is not None else {}
+    config.update(loaded_config)
+
+    # Override with CLI Arguments, priority 1
+    for key, value in vars(args).items():
+        if (value is not None and not isinstance(value, bool)) or (isinstance(value, bool) and value == True):
+            config[key] = value
+
+    return config
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="matrix_factorization")
-    # training configurations
-    parser.add_argument("--max_epoch", type=int, default=50)
-    parser.add_argument("--batch_size", type=int, default=16384)
+    # Config file
+    parser.add_argument("--config", type=str, default=None, help="Path to the YAML configuration file.")
+    # Model configuration
+    parser.add_argument("--model", type=str, default=None)
+    parser.add_argument("--embedding_dimension", type=int, default=None)
+    # Training configurations
+    parser.add_argument("--max_epoch", type=int, default=None)
+    parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--shuffle", action="store_true", default=False)
-    parser.add_argument("--evaluation_cutoffs", type=int, nargs="+", default=[2, 10, 50])
-    # early stopping configurations
+    parser.add_argument("--learning_rate", type=float, default=None)
+    parser.add_argument("--l2_regularization", type=float, default=None)
+    # Tracking configurations
+    parser.add_argument("--log_freq", type=str, default=None)
+    parser.add_argument("--evaluation_cutoffs", type=int, nargs="+", default=None)
+    # Early stopping configurations
     parser.add_argument("--early_stopping", action="store_true", default=False)
-    parser.add_argument("--early_stopping_monitor", type=str, default="test_recall@10")
-    parser.add_argument("--early_stopping_mode", type=str, default="max")
-    parser.add_argument("--early_stopping_patience", type=int, default=0)
-    parser.add_argument("--random_seed", type=int, default=42)
+    parser.add_argument("--early_stopping_monitor", type=str, default=None)
+    parser.add_argument("--early_stopping_mode", type=str, default=None)
+    parser.add_argument("--early_stopping_patience", type=int, default=None)
+    # Utilities
+    parser.add_argument("--random_seed", type=int, default=None)
+    parser.add_argument("--store_model", action="store_true", default=False)
 
     args = parser.parse_args()
-    config = vars(args)
+    config = compile_config(args)
 
     main(**config)

@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
+@tf.function(jit_compile=True)
 def gather_dense(sparse_tensor: tf.sparse.SparseTensor, row_indices:tf.Tensor) -> tf.Tensor:
     """Take only the indices specified in the row indices and then convert to dense."""
     old_indices = sparse_tensor.indices[:, 0]
