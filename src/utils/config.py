@@ -1,7 +1,8 @@
+import re
 import json
 import yaml
-import random
 import math
+import random
 from typing import Dict
 
 def store_json(data, filepath):
@@ -67,8 +68,9 @@ def load_config(config_path: str) -> Dict:
         single_run_config.update(config)
 
     # Convert string scientific notation to floating point numbers
+    scientific_notation_pattern = re.compile(r'^-?\d+\.?\d*[eE][+-]?\d+$')
     for key, value in single_run_config.items():
-        if isinstance(value, str) and 'e' in value.lower():
+        if isinstance(value, str) and scientific_notation_pattern.match(value):
             single_run_config[key] = float(value)
 
     return single_run_config
