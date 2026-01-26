@@ -15,7 +15,9 @@ python main.py \
 
 # Single Call - Pre-Configured Parameters
 ```
-python main.py --config=configs/single_runs/baseline_matrix_factorization.yaml
+python main.py \
+    --config=configs/single_runs/baseline_matrix_factorization.yaml \
+    --embedding_dimension=1024
 ```
 
 # Hyperparameter Tuning
