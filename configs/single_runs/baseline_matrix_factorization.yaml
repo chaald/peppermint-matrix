@@ -8,7 +8,7 @@ parameters:
     value: matrix_factorization
   embedding_dimension:
     distribution: constant
-    value: 64
+    value: 1024
   
   # Training configurations
   max_epoch:
@@ -16,11 +16,11 @@ parameters:
   batch_size:
     value: 16384
   shuffle:
-    value: true
+    value: false
   learning_rate:
     value: 0.01
   l2_regularization:
-    value: 0.0
+    value: 1e-10
 
   # Tracking configurations
   log_freq:
