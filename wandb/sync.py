@@ -70,6 +70,7 @@ def main(
             "run_name": run.name,
             "sweep_id": run.sweep.id if run.sweep else None,
             "model": run.config.get("model"),
+            "created_at": run.created_at,
             **run_config,
             **{metric: run_history[metric].to_list() for metric in run_history},
             **best_summary,
@@ -100,8 +101,11 @@ def main(
 
     # Create a Polars DataFrame from the records
     experiment_runs = pl.DataFrame(records, infer_schema_length=None)
+    experiment_runs = experiment_runs.with_columns(
+        pl.col("created_at").str.to_datetime("%Y-%m-%dT%H:%M:%SZ")
+    )
         
-    # # Tag run as available locally if the model files exist
+    # Tag run as available locally if the model files exist
     local_run_ids = []
     local_sweep_ids = os.listdir(f"./models/{model}/")
     for sweep_id in local_sweep_ids:

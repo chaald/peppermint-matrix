@@ -73,7 +73,9 @@ def main(**config):
         model = MatrixFactorization(
             train_features_meta, 
             embedding_dimension_count=config["embedding_dimension"],
+            l1_regularization=config["l1_regularization"],
             l2_regularization=config["l2_regularization"],
+            embedding_dropout_rate=config["embedding_dropout_rate"],
             evaluation_cutoffs=config["evaluation_cutoffs"]
         )
     else:
@@ -157,7 +159,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--shuffle", action="store_true", default=False)
     parser.add_argument("--learning_rate", type=float, default=None)
+    parser.add_argument("--l1_regularization", type=float, default=None)
     parser.add_argument("--l2_regularization", type=float, default=None)
+    parser.add_argument("--embedding_dropout_rate", type=float, default=None)
     # Tracking configurations
     parser.add_argument("--log_freq", type=str, default=None)
     parser.add_argument("--evaluation_cutoffs", type=int, nargs="+", default=None)

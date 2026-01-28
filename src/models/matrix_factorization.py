@@ -23,6 +23,7 @@ class MatrixFactorization(keras.Model):
         embedding_dimension_count: int, 
         l1_regularization: float = 0.0, 
         l2_regularization: float = 0.0,
+        embedding_dropout_rate: float = 0.0,
         evaluation_cutoffs: list = [2, 10, 50],
         **kwargs
     ):
@@ -31,6 +32,7 @@ class MatrixFactorization(keras.Model):
         self.embedding_dimension_count = embedding_dimension_count
         self.l1_regularization = l1_regularization
         self.l2_regularization = l2_regularization
+        self.embedding_dropout_rate = embedding_dropout_rate
         self.evaluation_cutoffs = evaluation_cutoffs
 
         # Lookup Layers
@@ -48,16 +50,20 @@ class MatrixFactorization(keras.Model):
             input_dim=features_meta["user_id"]["unique_count"] + 1,
             output_dim=embedding_dimension_count,
             embeddings_initializer='uniform',
-            embeddings_regularizer=keras.regularizers.l1_l2(l1=l1_regularization, l2=l2_regularization),
+            embeddings_regularizer=keras.regularizers.L1L2(l1=l1_regularization, l2=l2_regularization),
             name="user_embedding_layer"
         )
         self.item_embedding_layer = keras.layers.Embedding(
             input_dim=features_meta["item_id"]["unique_count"] + 1,
             output_dim=embedding_dimension_count,
             embeddings_initializer='uniform',
-            embeddings_regularizer=keras.regularizers.l1_l2(l1=l1_regularization, l2=l2_regularization),
+            embeddings_regularizer=keras.regularizers.L1L2(l1=l1_regularization, l2=l2_regularization),
             name="item_embedding_layer"
         )
+
+        # Embedding Dropout Layer
+        self.user_embedding_dropout_layer = keras.layers.Dropout(rate=embedding_dropout_rate)
+        self.item_embedding_dropout_layer = keras.layers.Dropout(rate=embedding_dropout_rate)
 
         # Loss & Metrics Tracker
         self.train_loss_tracker = keras.metrics.Mean(name="train_loss")
@@ -137,20 +143,22 @@ class MatrixFactorization(keras.Model):
         self.train_interaction_history = []
         self.test_interaction_history = []
 
-    def call(self, user_ids: tf.Tensor, item_ids: tf.Tensor) -> tf.Tensor:
-        user_embedding = self.user_embedding(user_ids)
-        item_embedding = self.item_embedding(item_ids)
+    def call(self, user_ids: tf.Tensor, item_ids: tf.Tensor, training: bool = False) -> tf.Tensor:
+        user_embedding = self.user_embedding(user_ids, training=training)
+        item_embedding = self.item_embedding(item_ids, training=training)
         predicted_interaction_probability = tf.reduce_sum(user_embedding * item_embedding, axis=1)
         return predicted_interaction_probability
     
-    def user_embedding(self, user_ids: tf.Tensor) -> tf.Tensor:
+    def user_embedding(self, user_ids: tf.Tensor, training: bool = False) -> tf.Tensor:
         user_indices = self.user_lookup_layer(user_ids)
         user_embedding = self.user_embedding_layer(user_indices)
+        user_embedding = self.user_embedding_dropout_layer(user_embedding, training=training)
         return user_embedding
     
-    def item_embedding(self, item_ids: tf.Tensor) -> tf.Tensor:
+    def item_embedding(self, item_ids: tf.Tensor, training: bool = False) -> tf.Tensor:
         item_indices = self.item_lookup_layer(item_ids)
         item_embedding = self.item_embedding_layer(item_indices)
+        item_embedding = self.item_embedding_dropout_layer(item_embedding, training=training)
         return item_embedding
     
     def calculate_loss(
@@ -229,9 +237,9 @@ class MatrixFactorization(keras.Model):
                     
                     # forward pass
                     with tf.GradientTape() as tape:
-                        user_embedding = self.user_embedding(user_ids)
-                        item_embedding = self.item_embedding(item_ids)
-                        negative_embedding = self.item_embedding(random_negatives)
+                        user_embedding = self.user_embedding(user_ids, training=True)
+                        item_embedding = self.item_embedding(item_ids, training=True)
+                        negative_embedding = self.item_embedding(random_negatives, training=True)
 
                         loss_value = self.calculate_loss(
                             user_embeddings=user_embedding,
@@ -551,6 +559,7 @@ class MatrixFactorization(keras.Model):
             "embedding_dimension_count": self.embedding_dimension_count,
             "l1_regularization": self.l1_regularization,
             "l2_regularization": self.l2_regularization,
+            "embedding_dropout_rate": self.embedding_dropout_rate,
             "evaluation_cutoffs": self.evaluation_cutoffs
         })
 
