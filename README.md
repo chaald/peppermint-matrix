@@ -38,8 +38,10 @@ python hyperparameter_search.py \
 
 # Sync Wandb Summary
 ```
-python sync_wandb.py \
+python wandb/sync.py \
     --model=matrix_factorization \
+    --process_count=8 \
+    --threads_per_process=32 \
     --sorting_criterion epoch/test_hitrate@20:0.5 epoch/test_ndcg@20:0.25 \
     --output_path=wandb/summary.parquet
 ```
