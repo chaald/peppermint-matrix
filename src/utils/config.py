@@ -37,33 +37,33 @@ def parse_scientific_notation(value: Union[str, List[str]]) -> float:
         return float(value) if isinstance(value, str) and scientific_notation_pattern.match(value) else value
 
 def parse_parameters(parameters_config: Dict) -> Dict:
-    retval = {}
+    parsed_parameters = {}
     for parameter, parameter_config in parameters_config.items():
         if not isinstance(parameter_config, dict):
-            retval[parameter] = parameter_config
+            parsed_parameters[parameter] = parameter_config
         elif "value" in parameter_config:
-            retval[parameter] = parameter_config["value"]
+            parsed_parameters[parameter] = parameter_config["value"]
         elif "distribution" in parameter_config:
             distribution = parameter_config["distribution"]
             if distribution == "constant":
-                retval[parameter] = parameter_config["value"]
+                parsed_parameters[parameter] = parameter_config["value"]
             elif distribution == "categorical":
-                retval[parameter] = random.choice(parameter_config["values"])
+                parsed_parameters[parameter] = random.choice(parameter_config["values"])
             elif distribution == "int_uniform":
-                retval[parameter] = random.randint(parameter_config["min"], parameter_config["max"])
+                parsed_parameters[parameter] = random.randint(parameter_config["min"], parameter_config["max"])
             elif distribution == "uniform": # float uniform
-                retval[parameter] = random.uniform(parameter_config["min"], parameter_config["max"])
+                parsed_parameters[parameter] = random.uniform(parameter_config["min"], parameter_config["max"])
             elif distribution == "log_uniform":
                 log_min = parameter_config["min"]
                 log_max = parameter_config["max"]
                 sampled_log_value = random.uniform(log_min, log_max)
-                retval[parameter] = math.exp(sampled_log_value)
+                parsed_parameters[parameter] = math.exp(sampled_log_value)
             else:
                 raise ValueError(f"Unsupported distribution type: {distribution} for parameter: {parameter}")
         else:
             raise ValueError(f"Invalid parameter configuration for {parameter}: {parameter_config}")
 
-    return retval
+    return parsed_parameters
 
 def parse_config(config_str: str) -> Dict:
     run_config = json.loads(config_str)
