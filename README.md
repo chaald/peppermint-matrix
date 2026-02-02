@@ -17,12 +17,14 @@ python main.py \
 ```
 python main.py \
     --config=configs/single_runs/baseline_matrix_factorization.yaml \
+    --config_collapse_method=exhaustive \
     --embedding_dimension=1024
 ```
 
 # Hyperparameter Tuning
 ```
 python hyperparameter_search.py \
+    --method=wandb \
     --config=configs/hyperparameter_search/baseline_matrix_factorization.yaml \
     --nworker=4 \
     --nruns=16

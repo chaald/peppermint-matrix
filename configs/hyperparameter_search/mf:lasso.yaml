@@ -1,0 +1,55 @@
+method: random
+metric:
+  goal: maximize
+  name: test_recall@10
+parameters:
+  # Model configuration
+  model:
+    value: matrix_factorization
+  embedding_dimension:
+    distribution: categorical
+    values: [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+  
+  # Training configurations
+  max_epoch:
+    value: 64
+  batch_size:
+    value: 16384
+  shuffle:
+    distribution: categorical
+    values: [true, false]
+  learning_rate:
+    value: 0.01
+  l1_regularization:
+    distribution: categorical
+    values: [0.0, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]
+  l2_regularization:
+    value: 0.0
+  embedding_dropout_rate:
+    value: 0.0
+
+  # Tracking configurations
+  log_freq:
+    value: epoch
+  evaluation_cutoffs:
+    distribution: constant
+    value: [2, 10, 20, 50]
+  
+  # Early stopping configurations
+  early_stopping:
+    value: false
+  early_stopping_monitor:
+    value: test_recall@10
+  early_stopping_mode:
+    value: max
+  early_stopping_patience:
+    value: 0
+
+  # Utilities
+  random_seed:
+    distribution: int_uniform
+    min: 1
+    max: 16384
+  store_model:
+    value: false
+  
