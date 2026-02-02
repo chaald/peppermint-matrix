@@ -3,7 +3,7 @@ import json
 import yaml
 import math
 import random
-from typing import Dict
+from typing import Union, List, Dict
 
 def store_json(data, filepath):
     with open(filepath, "w") as file:
@@ -25,6 +25,51 @@ def load_yaml(filepath) -> Dict:
     
     return data
 
+def parse_scientific_notation(value: Union[str, List[str]]) -> float:
+    """
+    Parse a string in scientific notation to a float if applicable.
+    """
+
+    scientific_notation_pattern = re.compile(r'^-?\d+\.?\d*[eE][+-]?\d+$')
+    if isinstance(value, list):
+        return [float(v) if isinstance(v, str) and scientific_notation_pattern.match(v) else v for v in value]
+    else:
+        return float(value) if isinstance(value, str) and scientific_notation_pattern.match(value) else value
+
+def parse_parameters(parameters_config: Dict) -> Dict:
+    retval = {}
+    for parameter, parameter_config in parameters_config.items():
+        if not isinstance(parameter_config, dict):
+            retval[parameter] = parameter_config
+        elif "value" in parameter_config:
+            retval[parameter] = parameter_config["value"]
+        elif "distribution" in parameter_config:
+            distribution = parameter_config["distribution"]
+            if distribution == "constant":
+                retval[parameter] = parameter_config["value"]
+            elif distribution == "categorical":
+                retval[parameter] = random.choice(parameter_config["values"])
+            elif distribution == "int_uniform":
+                retval[parameter] = random.randint(parameter_config["min"], parameter_config["max"])
+            elif distribution == "uniform": # float uniform
+                retval[parameter] = random.uniform(parameter_config["min"], parameter_config["max"])
+            elif distribution == "log_uniform":
+                log_min = parameter_config["min"]
+                log_max = parameter_config["max"]
+                sampled_log_value = random.uniform(log_min, log_max)
+                retval[parameter] = math.exp(sampled_log_value)
+            else:
+                raise ValueError(f"Unsupported distribution type: {distribution} for parameter: {parameter}")
+        else:
+            raise ValueError(f"Invalid parameter configuration for {parameter}: {parameter_config}")
+
+    return retval
+
+def parse_config(config_str: str) -> Dict:
+    run_config = json.loads(config_str)
+    run_config = parse_parameters({k: v for k, v in run_config.items() if k != "_wandb"})
+    return run_config
+
 def load_config(config_path: str) -> Dict:
     """
     Load configuration from a YAML file.
@@ -39,38 +84,12 @@ def load_config(config_path: str) -> Dict:
     
     config = load_yaml(config_path)
     if "parameters" in config:
-        for parameter, parameter_config in config["parameters"].items():
-
-            if not isinstance(parameter_config, dict):
-                single_run_config[parameter] = parameter_config
-            elif "value" in parameter_config:
-                single_run_config[parameter] = parameter_config["value"]
-            elif "distribution" in parameter_config:
-                distribution = parameter_config["distribution"]
-                if distribution == "constant":
-                    single_run_config[parameter] = parameter_config["value"]
-                elif distribution == "categorical":
-                    single_run_config[parameter] = random.choice(parameter_config["values"])
-                elif distribution == "int_uniform":
-                    single_run_config[parameter] = random.randint(parameter_config["min"], parameter_config["max"])
-                elif distribution == "uniform": # float uniform
-                    single_run_config[parameter] = random.uniform(parameter_config["min"], parameter_config["max"])
-                elif distribution == "log_uniform":
-                    log_min = parameter_config["min"]
-                    log_max = parameter_config["max"]
-                    sampled_log_value = random.uniform(log_min, log_max)
-                    single_run_config[parameter] = math.exp(sampled_log_value)
-                else:
-                    raise ValueError(f"Unsupported distribution type: {distribution} for parameter: {parameter}")
-            else:
-                raise ValueError(f"Invalid parameter configuration for {parameter}: {parameter_config}")
+        single_run_config.update(parse_parameters(config["parameters"]))
     else:
         single_run_config.update(config)
 
     # Convert string scientific notation to floating point numbers
-    scientific_notation_pattern = re.compile(r'^-?\d+\.?\d*[eE][+-]?\d+$')
     for key, value in single_run_config.items():
-        if isinstance(value, str) and scientific_notation_pattern.match(value):
-            single_run_config[key] = float(value)
+        single_run_config[key] = parse_scientific_notation(value)
 
     return single_run_config
