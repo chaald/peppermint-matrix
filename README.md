@@ -33,9 +33,19 @@ python hyperparameter_search.py \
 # Hyperparameter Tuning - Continue Sweep
 ```
 python hyperparameter_search.py \
+    --method=wandb \
     --sweep_id=<sweep_id> \
     --nworker=4 \
     --nruns=16
+```
+
+# Hyperparameter Tuning - Exhaustive Sweep
+```
+python hyperparameter_search.py \
+    --method=exhaustive \
+    --config=configs/hyperparameter_search/mf:elasticnet.yaml \
+    --nworker=4 \
+    --nruns=8
 ```
 
 # Sync Wandb Summary

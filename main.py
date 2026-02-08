@@ -137,11 +137,14 @@ def compile_config(args):
     config = load_config("configs/default.yaml")
 
     # Load Config File, priority 2
-    loaded_config = load_config(args.config, method=args.config_collapse_method) if args.config is not None else {}
+    loaded_config = load_config(args.config, method=args.method) if args.config is not None else {}
     config.update(loaded_config)
 
     # Override with CLI Arguments, priority 1
     for key, value in vars(args).items():
+        if key in ["nworker", "nruns", "sweep_id", "method"]:
+            continue
+
         if (value is not None and not isinstance(value, bool)) or (isinstance(value, bool) and value == True):
             config[key] = value
 
@@ -151,7 +154,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Config file
     parser.add_argument("--config", type=str, default=None, help="Path to the YAML configuration file.")
-    parser.add_argument("--config_collapse_method", type=str, default="random", help="How to collapse the config into single run config, Literal[random, exhaustive].")
+    parser.add_argument("--method", type=str, default="random", help="How to collapse the config into single run config, Literal[random, exhaustive].")
     # Model configuration
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--embedding_dimension", type=int, default=None)
