@@ -7,7 +7,8 @@ parameters:
   model:
     value: matrix_factorization
   embedding_dimension:
-    value: 128
+    distribution: categorical
+    values: [64, 256, 512, 1024]
   
   # Training configurations
   max_epoch:
