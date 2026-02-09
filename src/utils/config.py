@@ -4,6 +4,7 @@ import yaml
 import math
 import random
 import wandb
+import pprint
 import numpy as np
 import polars as pl
 
@@ -173,10 +174,24 @@ def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
         parameter_index = []
         for j, value in enumerate(rows):
             parameter_name = categorical_parameter_names[j]
+
+            # Skip if the value is not in the current parameter space
+            if value not in free_categorical_parameters[parameter_name]:
+                break
+            
             value_index = free_categorical_parameters[parameter_name].index(value)
             parameter_index.append(value_index)
 
+        # Only consider complete indices
+        if len(parameter_index) != len(categorical_parameter_names):
+            continue
+
         parameter_space[*parameter_index] += 1
+
+    non_zero_mask = (parameter_space > 0).astype(np.int32)
+    print(f"Parameter space shape: {parameter_space.shape}")
+    print(f"Existing configurations in the parameter space: {np.sum(non_zero_mask)} / {parameter_space.size}")
+    print(f"Parameter space are {np.sum(non_zero_mask) / parameter_space.size * 100:.2f}% occupied.")
 
     ## Find the flat index of the minimum value
     min_flat_index = np.argmin(parameter_space)
