@@ -13,4 +13,6 @@ wheels/
 models/
 
 # WandB files
-wandb/
+wandb/*
+!wandb/sync.py
+!wandb/adjust.py

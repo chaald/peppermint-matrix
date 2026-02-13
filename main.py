@@ -73,7 +73,9 @@ def main(**config):
         model = MatrixFactorization(
             train_features_meta, 
             embedding_dimension_count=config["embedding_dimension"],
+            l1_regularization=config["l1_regularization"],
             l2_regularization=config["l2_regularization"],
+            embedding_dropout_rate=config["embedding_dropout_rate"],
             evaluation_cutoffs=config["evaluation_cutoffs"]
         )
     else:
@@ -135,11 +137,14 @@ def compile_config(args):
     config = load_config("configs/default.yaml")
 
     # Load Config File, priority 2
-    loaded_config = load_config(args.config) if args.config is not None else {}
+    loaded_config = load_config(args.config, method=args.method) if args.config is not None else {}
     config.update(loaded_config)
 
     # Override with CLI Arguments, priority 1
     for key, value in vars(args).items():
+        if key in ["nworker", "nruns", "sweep_id", "method"]:
+            continue
+
         if (value is not None and not isinstance(value, bool)) or (isinstance(value, bool) and value == True):
             config[key] = value
 
@@ -149,6 +154,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Config file
     parser.add_argument("--config", type=str, default=None, help="Path to the YAML configuration file.")
+    parser.add_argument("--method", type=str, default="random", help="How to collapse the config into single run config, Literal[random, exhaustive].")
     # Model configuration
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--embedding_dimension", type=int, default=None)
@@ -157,7 +163,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--shuffle", action="store_true", default=False)
     parser.add_argument("--learning_rate", type=float, default=None)
+    parser.add_argument("--l1_regularization", type=float, default=None)
     parser.add_argument("--l2_regularization", type=float, default=None)
+    parser.add_argument("--embedding_dropout_rate", type=float, default=None)
     # Tracking configurations
     parser.add_argument("--log_freq", type=str, default=None)
     parser.add_argument("--evaluation_cutoffs", type=int, nargs="+", default=None)

@@ -7,8 +7,8 @@ parameters:
   model:
     value: matrix_factorization
   embedding_dimension:
-    distribution: constant
-    value: 128
+    distribution: categorical
+    values: [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
   
   # Training configurations
   max_epoch:
@@ -16,13 +16,15 @@ parameters:
   batch_size:
     value: 16384
   shuffle:
-    value: true
+    distribution: categorical
+    values: [true, false]
   learning_rate:
     value: 0.01
   l1_regularization:
-    value: 0.0
+    distribution: categorical
+    values: [0.0, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]
   l2_regularization:
-    value: 1e-7
+    value: 0.0
   embedding_dropout_rate:
     value: 0.0
 

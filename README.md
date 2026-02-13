@@ -16,14 +16,16 @@ python main.py \
 # Single Call - Pre-Configured Parameters
 ```
 python main.py \
-    --config=configs/single_runs/baseline_matrix_factorization.yaml \
+    --method=exhaustive \
+    --config=configs/hyperparameter_search/mf:elasticnet.yaml \
     --embedding_dimension=1024
 ```
 
-# Hyperparameter Tuning
+# Hyperparameter Tuning - Start New Sweep
 ```
 python hyperparameter_search.py \
-    --config=configs/hyperparameter_search/baseline_matrix_factorization.yaml \
+    --method=wandb \
+    --config=configs/hyperparameter_search/mf:elasticnet.yaml \
     --nworker=4 \
     --nruns=16
 ```
@@ -31,15 +33,27 @@ python hyperparameter_search.py \
 # Hyperparameter Tuning - Continue Sweep
 ```
 python hyperparameter_search.py \
+    --method=wandb \
     --sweep_id=<sweep_id> \
     --nworker=4 \
     --nruns=16
 ```
 
+# Hyperparameter Tuning - Exhaustive Sweep
+```
+python hyperparameter_search.py \
+    --method=exhaustive \
+    --config=configs/hyperparameter_search/mf:elasticnet.yaml \
+    --nworker=4 \
+    --nruns=8
+```
+
 # Sync Wandb Summary
 ```
-python sync_wandb.py \
+python wandb/sync.py \
     --model=matrix_factorization \
+    --process_count=8 \
+    --threads_per_process=32 \
     --sorting_criterion epoch/test_hitrate@20:0.5 epoch/test_ndcg@20:0.25 \
     --output_path=wandb/summary.parquet
 ```
