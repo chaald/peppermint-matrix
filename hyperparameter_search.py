@@ -2,6 +2,7 @@ import argparse
 import multiprocessing as mp
 import pprint
 import wandb
+import time
 
 from concurrent.futures import ProcessPoolExecutor
 from typing import Dict
@@ -77,6 +78,14 @@ if __name__ == "__main__":
         else:
             kernel_function = partial(local_agent, args, args.nruns)
 
-        futures = [executor.submit(kernel_function) for _ in range(args.nworker)]
+        futures = []
+        for i in range(args.nworker):
+            futures.append(
+                executor.submit(kernel_function)
+            )
+            print(f"Started worker {i+1}/{args.nworker}")
+            # add a small delay between starting workers to avoid race conditions during exhaustive search computation
+            time.sleep(60) # 1 minute delay, an exhaustive search take ~40 seconds to start and record parameter
+
         for future in futures:
             future.result() # This will raise any exceptions encountered in the worker processes
