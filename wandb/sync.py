@@ -1,5 +1,6 @@
 
 import os
+import time
 import tqdm
 import wandb
 import json
@@ -78,7 +79,7 @@ def fetch_run_metadata(api: wandb.Api, run_id: str, considered_metrics: Union[st
 def process_chunk(chunk: List[str], considered_metrics: Union[str, Dict[str, float]], threads_per_process: int = 16) -> List[Dict]:
     """Process a chunk of runs using a shared API object and thread pool."""
     # Each process creates its own API instance
-    api = wandb.Api(timeout=60)
+    api = wandb.Api(timeout=180)
     
     records = []
     errors = []
@@ -110,12 +111,14 @@ def main(
     ensure_available_locally: bool = False,
     sorting_criterion: List[str] = ["epoch/epoch"],
     output_path: str = "wandb/summary.parquet",
+    max_retries: int = 3,
 ):
     api = wandb.Api() # Initialize Weights & Biases API, used for fetching run data
 
     sorting_criterion = parse_metric_criterion(sorting_criterion)
     print(f"Using sorting criterion: ")
     pprint.pprint(sorting_criterion)
+    print(f"Max retries for failed runs: {max_retries}")
 
     query = """
         query Runs($project: String!, $entity: String!, $cursor: String, $filters: JSONString) {
@@ -166,28 +169,43 @@ def main(
         cursor = runs_data["pageInfo"]["endCursor"]
         print(f"Fetched {len(all_runs)} runs...")
 
-    # Split all runs into chunks
-    chunks = chunk_list(all_runs)
-    print(f"Split {len(all_runs)} runs into {len(chunks)} chunks of sizes: {[len(c) for c in chunks]}")
-
     # Process chunks in parallel using multiprocessing where each process uses multi-threading
     records = []
     errors = []
     ctx = mp.get_context('fork')
-    with concurrent.futures.ProcessPoolExecutor(max_workers=process_count, mp_context=ctx) as executor:
-        process_kernel = partial(process_chunk, considered_metrics=sorting_criterion, threads_per_process=threads_per_process)
-        
-        futures = {executor.submit(process_kernel, chunk): i for i, chunk in enumerate(chunks)}
-        
-        for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing chunks"):
-            result = future.result()
-            records.extend(result["records"])
-            errors.extend(result["errors"])
 
-    print(f"\nProcessed {len(records)} runs successfully")
+    attempt = 0 
+    is_retry = False
+    while attempt <= max_retries and (attempt == 0 or len(errors) > 0):
+        # Split all runs into chunks
+        chunks = chunk_list(all_runs)
+        print(f"Split {len(all_runs)} runs into {len(chunks)} chunks of sizes: {[len(c) for c in chunks]}")
+        errors = []
+
+        # Main processing loop with multiprocessing and multi-threading
+        label = f"Retry {attempt}/{max_retries}" if is_retry else "Processing chunks"
+        with concurrent.futures.ProcessPoolExecutor(max_workers=process_count, mp_context=ctx) as executor:
+            process_kernel = partial(process_chunk, considered_metrics=sorting_criterion, threads_per_process=threads_per_process)
+            futures = {executor.submit(process_kernel, chunk): i for i, chunk in enumerate(chunks)}
+
+            for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc=label):
+                result = future.result()
+                records.extend(result["records"])
+                errors.extend(result["errors"])
+
+        if errors:
+            print(f"{'Remaining' if is_retry else ''} Errors: {len(errors)}")
+
+            # Prepare for next retry
+            time.sleep(30)
+            is_retry = True
+            all_runs = [run_id for run_id, _ in errors]
+        attempt += 1
+
+    print(f"\nTotal processed: {len(records)} runs successfully")
     if errors:
-        print(f"Errors: {len(errors)}")
-        for run_id, err in errors[:5]:
+        print(f"Total unrecoverable errors after {max_retries} retries: {len(errors)}")
+        for run_id, err in errors:
             print(f"  - {run_id}: {err}")
 
     # Create a Polars DataFrame from the records
@@ -241,6 +259,7 @@ if __name__ == "__main__":
     parser.add_argument("--process_count", type=int, default=8, help="Number of parallel processes to use")
     parser.add_argument("--threads_per_process", type=int, default=32, help="Number of threads per process")
     parser.add_argument("--output_path", type=str, default="wandb/summary.parquet", help="Path to save the output CSV file")
+    parser.add_argument("--max_retries", type=int, default=3, help="Number of times to retry failed runs")
 
     args = parser.parse_args()
 
@@ -250,5 +269,6 @@ if __name__ == "__main__":
         threads_per_process=args.threads_per_process,
         ensure_available_locally=args.ensure_available_locally,
         sorting_criterion=args.sorting_criterion,
-        output_path=args.output_path
+        output_path=args.output_path,
+        max_retries=args.max_retries,
     )
