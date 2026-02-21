@@ -212,7 +212,7 @@ class MatrixFactorization(keras.Model):
         train_dataset_length = len(train_dataset)
         test_dataset_length = len(test_dataset) if test_dataset is not None else 0
         if shuffle:
-            train_dataset = train_dataset.shuffle(buffer_size=4*batch_size, reshuffle_each_iteration=True)
+            train_dataset = train_dataset.shuffle(buffer_size=train_dataset_length, reshuffle_each_iteration=True)
         if batch_size is not None and batch_size > 1:
             train_dataset = train_dataset.batch(batch_size)
             test_dataset = test_dataset.batch(batch_size) if test_dataset is not None else None

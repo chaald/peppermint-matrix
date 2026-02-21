@@ -192,6 +192,7 @@ def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
     print(f"Parameter space shape: {parameter_space.shape}")
     print(f"Existing configurations in the parameter space: {np.sum(non_zero_mask)} / {parameter_space.size}")
     print(f"Parameter space are {np.sum(non_zero_mask) / parameter_space.size * 100:.2f}% occupied.")
+    print(f"Average runs per configuration: {np.sum(parameter_space) / np.sum(non_zero_mask) if np.sum(non_zero_mask) > 0 else 0:.2f}")
 
     ## Find the flat index of the minimum value
     min_flat_index = np.argmin(parameter_space)
