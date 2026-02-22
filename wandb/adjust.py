@@ -11,11 +11,9 @@ run_count = 0
 for run in tqdm.tqdm(runs, total=len(runs)):
     if run.config.get("model") == "matrix_factorization":
         updated = False
-        if run.config.get("l1_regularization") is None:
-            run.config["l1_regularization"] = 0.0  # Set default value
-            updated = True
-        if run.config.get("embedding_dropout_rate") is None:
-            run.config["embedding_dropout_rate"] = 0.0  # Set default value
+
+        if run.config.get("tracker") is None:
+            run.config["tracker"] = "wandb"  # Set default value
             updated = True
 
         if updated:
