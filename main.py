@@ -27,8 +27,19 @@ def main(**config):
         config["log_freq"] = int(config["log_freq"]) if str(config["log_freq"]).isdigit() else config["log_freq"]
     
     # Initialize Trackers
-    wandb.init(project=PROJECT_NAME, config=config if config else None)
-    config = dict(wandb.config)
+    if config["tracker"] != "disabled":
+        wandb.init(project=PROJECT_NAME, config=config if config else None)
+        config = dict(wandb.config)
+
+        sweep_id = wandb.run.sweep_id if wandb.run.sweep_id else "single_runs"
+        run_id = wandb.run.id
+        run_name = wandb.run.name
+    else:
+        sweep_id = "single_runs"
+        run_id = "local"
+        run_name = "local"
+
+    # Print the final config for this run
     print(f"{'='*10} Run Configs {'='*25}")
     pprint.pprint(config)
     print(f"{'='*48}")
@@ -65,7 +76,6 @@ def main(**config):
     pprint.pprint(filter_vocabulary(train_features_meta))
     print(f"{'='*48}")
 
-
     # B. Model Initialization
     sampler = BayesianSampler(item_set=train_features_meta["item_id"]["vocabulary"], user_items=user_items)
 
@@ -101,11 +111,12 @@ def main(**config):
                     verbose=1
             )
         )
-    callbacks.append(
-        WandbMetricsLogger(
-            log_freq=config["log_freq"],
+    if config["tracker"] != "disabled":
+        callbacks.append(
+            WandbMetricsLogger(
+                log_freq=config["log_freq"],
+            )
         )
-    )
 
     results = model.fit(
         train_dataset=train_dataset,
@@ -116,7 +127,8 @@ def main(**config):
         callbacks=callbacks
     )
 
-    wandb.finish()
+    if config["tracker"] != "disabled":
+        wandb.finish()
 
     print(f"{'='*10} Final Results {'='*24}")
     pprint.pprint(results)
@@ -124,13 +136,19 @@ def main(**config):
 
     # Save the model
     if config["store_model"]:
-        sweep_id = wandb.run.sweep_id if wandb.run.sweep_id else "single_runs"
-        base_path = f"models/{config['model']}/{sweep_id}/{wandb.run.id}"
+        base_path = f"models/{config['model']}/{sweep_id}/{run_id}"
         os.makedirs(base_path, exist_ok=True)
 
         model.save(os.path.join(base_path, "model.keras"))
         store_yaml(config, os.path.join(base_path, "config.yaml"))
         print(f"Model saved to {os.path.join(base_path, 'model.keras')}")
+
+    return {
+        "run_id": run_id,
+        "run_name": run_name,
+        "config": config,
+        "final_metrics": results,
+    }
 
 def compile_config(args):
     # Load Default Config, priority 3
@@ -177,6 +195,7 @@ if __name__ == "__main__":
     # Utilities
     parser.add_argument("--random_seed", type=int, default=None)
     parser.add_argument("--store_model", action="store_true", default=False)
+    parser.add_argument("--tracker", type=str, default=None, help="Tracking backend. Use 'disabled' to skip wandb entirely.")
 
     args = parser.parse_args()
     config = compile_config(args)

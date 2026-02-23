@@ -27,4 +27,5 @@ dependencies = [
 filterwarnings = [
     "ignore::pytest.PytestAssertRewriteWarning",
     "ignore::FutureWarning",
+    "ignore::DeprecationWarning",
 ]

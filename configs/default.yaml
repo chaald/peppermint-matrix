@@ -19,7 +19,11 @@ parameters:
     value: false
   learning_rate:
     value: 0.01
+  l1_regularization:
+    value: 0.0
   l2_regularization:
+    value: 0.0
+  embedding_dropout_rate:
     value: 0.0
 
   # Tracking configurations
@@ -44,4 +48,6 @@ parameters:
     value: 42
   store_model:
     value: false
+  tracker:
+    value: wandb
   
