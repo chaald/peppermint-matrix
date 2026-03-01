@@ -259,6 +259,9 @@ class TestTrainingDeterminism:
 
         assert results1["final_metrics"] != pytest.approx(results2["final_metrics"], rel=1e-4)
 
+# List of run IDs to test replication on 
+# These runs should be chosen to cover a variety of configurations (different models, hyperparameters, etc.) to ensure that the replication test is robust across different settings.
+TARGET_RUN_IDS = ["px3wtuxs", "ppnmplwp"]
 class TestTrainingReplication:
     """
     Given a run name, we fetch the config and final metrics from wandb and check that running with that config locally reproduces the same metrics (within some tolerance).
@@ -283,15 +286,12 @@ class TestTrainingReplication:
         "epoch/train_ndcg@50", "epoch/test_ndcg@50",
     ]
 
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.target_run_id: str = "px3wtuxs"
-
-    def test_replicate_run(self) -> None:
+    @pytest.mark.parametrize("target_run_id", TARGET_RUN_IDS)
+    def test_replicate_run(self, target_run_id) -> None:
         import wandb
         
         api = wandb.Api()
-        target_run: Run = api.run(f"{api.default_entity}/{PROJECT_NAME}/{self.target_run_id}")
+        target_run: Run = api.run(f"{api.default_entity}/{PROJECT_NAME}/{target_run_id}")
         target_config = target_run.config
         target_summary = {key: value for key, value in target_run.summary.items() if key not in self.ignore_fields}
 
@@ -308,8 +308,3 @@ class TestTrainingReplication:
         pd.testing.assert_frame_equal(
             target_run.history()[self.tested_columns], result_run.history()[self.tested_columns], rtol=5e-3
         )
-
-class TestTrainingReplicationCase1(TestTrainingReplication):
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.target_run_id: str = "ppnmplwp"
