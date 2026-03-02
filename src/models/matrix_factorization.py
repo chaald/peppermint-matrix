@@ -1,8 +1,8 @@
 import numpy as np
 import tensorflow as tf
 import keras
-from tqdm import tqdm
 
+from tqdm import tqdm
 from src.baremetal import gather_dense
 from src.utils import preprocess_metric_aggregate
 from src.sampler import BayesianSampler
@@ -248,10 +248,11 @@ class MatrixFactorization(keras.Model):
                         )
 
                     # calculate gradient
-                    user_gradient, item_gradient = tape.gradient(loss_value, self.user_embedding_layer.trainable_variables + self.item_embedding_layer.trainable_variables)
+                    gradients = tape.gradient(loss_value, self.trainable_variables)
 
                     # back propagation
-                    self.optimizer.apply_gradients(zip([user_gradient, item_gradient], self.user_embedding_layer.trainable_variables + self.item_embedding_layer.trainable_variables))
+                    self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+                    self.on_parameter_update()
 
                     # update training loss
                     self.train_loss_tracker.update_state(loss_value)
@@ -564,4 +565,7 @@ class MatrixFactorization(keras.Model):
         })
 
         return config
-        
+    
+    def on_parameter_update(self):
+        """Hook called after optimizer.apply_gradients(). Override in subclasses."""
+        pass
