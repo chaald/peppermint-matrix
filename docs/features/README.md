@@ -1,0 +1,43 @@
+# Feature Documentation
+
+This folder contains documentation for features being developed in this project.
+
+## Structure
+
+Each feature gets its own `.md` file:
+
+```
+docs/features/
+  README.md          ← this file (index)
+  feature-name.md    ← one file per feature
+```
+
+## Feature Index
+
+| Feature | File | Date Added | Status |
+|---------|------|------------|--------|
+| _(add features here)_ | | | |
+
+## Template
+
+Use this as a starting point for new feature docs:
+
+```markdown
+# Feature Name
+**Date:** YYYY-MM-DD
+
+## Overview
+Brief description of what this feature does.
+
+## Motivation
+Why this feature is needed.
+
+## Design
+How it works / key implementation decisions.
+
+## Usage
+How to use it (code examples if applicable).
+
+## Status
+- [ ] In progress / completed / planned
+```

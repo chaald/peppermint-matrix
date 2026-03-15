@@ -4,6 +4,25 @@ This file contains guidance for AI agents working in this repository.
 
 ---
 
+## Documenting New Features
+
+Whenever a new feature is being developed, create a documentation file for it in `docs/features/`.
+
+### Steps
+
+1. Create `docs/features/<feature-name>.md` using the template in [`docs/features/README.md`](docs/features/README.md).
+2. Add a corresponding row to the **Feature Index** table in [`docs/features/README.md`](docs/features/README.md).
+
+### Feature Index (in `docs/features/README.md`)
+
+Keep this table up to date as features are added:
+
+| Feature | File | Date Added | Status |
+|---------|------|------------|--------|
+| Example | [example.md](docs/features/example.md) | 2026-03-15 | In progress |
+
+---
+
 ## Fetching Previous Runs and Configurations from W&B
 
 ### Primary method — `fetch_experiment_runs` in `src/utils/config.py`
