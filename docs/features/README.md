@@ -16,7 +16,8 @@ docs/features/
 
 | Feature | File | Date Added | Status |
 |---------|------|------------|--------|
-| _(add features here)_ | | | |
+| Surrogate Model & Exploration Saturation Metric | [surrogate-model.md](surrogate-model.md) | 2026-03-15 | Planned |
+| UCB-Guided Hyperparameter Search | [ucb-hyperparameter-search.md](ucb-hyperparameter-search.md) | 2026-03-15 | Planned |
 
 ## Template
 
