@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Model binaries
-models/
+/models/
 
 # WandB files
 wandb/*
