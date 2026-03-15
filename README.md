@@ -209,18 +209,53 @@ python main.py \
     --random_seed=171
 ```
 
-### From a pre-configured YAML file
+### From a YAML config file
+
+YAML configs come in two forms:
+
+**Flat config** — plain key-value pairs, used as-is:
+```yaml
+model: matrix_factorization
+embedding_dimension: 128
+learning_rate: 0.01
+l2_regularization: 1e-7
+```
+
+**Parameter space config** — uses a `parameters` block where each parameter declares a distribution. This is the same format used by W&B sweeps:
+```yaml
+parameters:
+  embedding_dimension:
+    distribution: categorical
+    values: [16, 64, 256, 1024]
+  l2_regularization:
+    distribution: categorical
+    values: [0.0, 1e-6, 1e-4]
+  random_seed:
+    distribution: int_uniform
+    min: 1
+    max: 16384
+  max_epoch:
+    value: 64          # fixed value
+```
+
+Supported distributions: `constant`, `categorical`, `int_uniform`, `uniform`, `log_uniform`.
+
+When a parameter space config is passed to `main.py` or `hyperparameter_search.py`, it is **resolved into a single run config** using `--method`:
+
+- `random` *(default)* — each free parameter is independently sampled from its declared distribution
+- `exhaustive` — queries W&B for previously completed runs, builds a count grid over all categorical parameter combinations, and picks the **least-explored** combination; any remaining random parameters are still sampled
 
 ```bash
+# Resolve by random sampling
+python main.py \
+    --config=configs/hyperparameter_search/mf:elasticnet.yaml
+
+# Resolve by picking the least-explored categorical combination
 python main.py \
     --method=exhaustive \
     --config=configs/hyperparameter_search/mf:elasticnet.yaml \
-    --embedding_dimension=1024
+    --embedding_dimension=1024   # CLI args still override after resolution
 ```
-
-The `--method` argument controls how the YAML config is resolved into a single run config:
-- `random` — sample randomly from defined distributions (default)
-- `exhaustive` — take the next unexplored combination from the grid
 
 ### Skip W&B tracking
 
