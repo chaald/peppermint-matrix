@@ -1,5 +1,7 @@
 
 import os
+os.environ["WANDB_SILENT"] = "true"
+
 import time
 import tqdm
 import wandb
