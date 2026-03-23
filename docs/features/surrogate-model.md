@@ -133,7 +133,7 @@ This mitigation is **not yet implemented** — it is noted here as the recommend
 
 The surrogate model built here is a **shared dependency** for the next planned feature:
 
-- **[UCB-Guided Hyperparameter Search](ucb-hyperparameter-search.md)** — reuses the same Random Forest fit and `fetch_experiment_runs` data source to compute UCB scores for unexplored configurations. The ESM metric can also be logged at the start of each UCB worker call to track exploration progress over time.
+- **[Model-Based Hyperparameter Search](model-based-hyperparameter-search.md)** — reuses the same Random Forest fit and `fetch_experiment_runs` data source to compute UCB scores for unexplored configurations. The ESM metric can also be logged at the start of each UCB worker call to track exploration progress over time.
 
 The surrogate model feature should be implemented and validated first before the UCB search feature is built on top of it.
 

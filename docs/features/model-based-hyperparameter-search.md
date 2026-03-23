@@ -1,4 +1,4 @@
-# UCB-Guided Hyperparameter Search
+# Model-Based Hyperparameter Search
 **Date:** 2026-03-15
 
 ## Overview
@@ -34,9 +34,9 @@ The next configuration to run is $\arg\max_x \text{UCB}(x)$ over all unexplored 
 
 ### Integration Point
 
-A new `--method=ucb` option in `hyperparameter_search.py`, alongside the existing `random`, `exhaustive`, and `wandb` methods.
+A new `--method=model_based` option in `hyperparameter_search.py`, alongside the existing `random`, `exhaustive`, and `wandb` methods.
 
-The corresponding resolver in `src/utils/config.py` (`ucb_parse_parameters`) follows the same interface as `exhaustive_parse_parameters`:
+The corresponding resolver in `src/utils/config.py` (`model_based_parse_params`) follows the same interface as `exhaustive_parse_parameters`:
 - Takes a `parameters_config` dict
 - Returns a single resolved config dict
 - Can be called once per worker, just like the existing methods
@@ -56,7 +56,7 @@ Steps 1–5 replace the current W&B round-trip + argmin logic in `exhaustive_par
 
 | Argument | Default | Description |
 |---|---|---|
-| `--method=ucb` | — | Enable UCB-guided search |
+| `--method=model_based` | — | Enable model-based search |
 | `--ucb_beta` | `1.0` | Exploration weight $\beta$ in the UCB formula |
 | `--ucb_target` | `test_recall@10` | Target metric column to optimise (must exist in completed run data) |
 | `--ucb_n_estimators` | `200` | Number of trees in the Random Forest surrogate |
@@ -78,9 +78,9 @@ This feature **depends on** the surrogate model feature ([surrogate-model.md](su
 ## Usage
 
 ```bash
-# UCB-guided search with default beta
+# Model-based search with default beta
 python hyperparameter_search.py \
-    --method=ucb \
+    --method=model_based \
     --config=configs/hyperparameter_search/mf:elasticnet.yaml \
     --nworker=4 \
     --nruns=8 \
@@ -88,7 +88,7 @@ python hyperparameter_search.py \
 
 # More exploratory (higher beta)
 python hyperparameter_search.py \
-    --method=ucb \
+    --method=model_based \
     --config=configs/hyperparameter_search/mf:elasticnet.yaml \
     --nworker=4 \
     --nruns=8 \
@@ -104,8 +104,8 @@ python hyperparameter_search.py \
 
 ## Status
 - [ ] Planned
-- [ ] `ucb_parse_parameters` in `src/utils/config.py`
-- [ ] `--method=ucb` and related args in `hyperparameter_search.py`
+- [ ] `model_based_parse_params` in `src/utils/config.py`
+- [ ] `--method=model_based` and related args in `hyperparameter_search.py`
 - [ ] Fallback logic for cold start / all-explored cases
 - [ ] Multi-worker deduplication strategy
 - [ ] Integration test
