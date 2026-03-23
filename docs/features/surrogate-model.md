@@ -29,7 +29,15 @@ The Random Forest naturally provides:
 - $\hat{\mu}$ — mean prediction across all trees (expected score)
 - $\hat{\sigma}$ — std across trees (epistemic uncertainty / how well-explored this region is)
 
-No encoding tricks are needed — the tree ensemble handles discrete and boolean inputs natively.
+**Preprocessing — `RegularizationLogTransformer`:**
+
+Regularization columns (`l1_regularization`, `l2_regularization`) span many orders of magnitude (e.g. `1e-8` to `1e-4`). A log₁₀ transform is applied as the first step of an sklearn `Pipeline` so that tree splits occur on a log scale, which better reflects the structure of the hyperparameter grid. Configs with zero regularization map to a sentinel value of `-15` (≈ log₁₀(1e-15)). Values are rounded to 1 decimal place after the transform to avoid floating-point precision issues.
+
+All other features (`embedding_dimension`, `shuffle`, `embedding_dropout_rate`) are passed through unchanged — the tree ensemble handles discrete and boolean inputs natively.
+
+**Duplicate-run aggregation:**
+
+Multiple runs with the same hyperparameter config but different random seeds are aggregated with `.mean()` per unique config. This smooths out seed-level variance and gives a more stable estimate of each config's expected performance.
 
 ### Exploration Saturation Metric (ESM)
 
@@ -40,10 +48,11 @@ Expressed as a percentage — **99.99%** means 4 nines, essentially saturated. T
 $$\text{ESM} = \frac{\mu_{\text{best, observed}}}{\hat{\mu}_{\text{max}} + \beta \cdot \hat{\sigma}_{\text{max}}} \times 100\%$$
 
 Where:
-- $\mu_{\text{best, observed}}$ — the best score actually observed in completed runs
-- $\hat{\mu}_{\text{max}}$ — the highest mean prediction across all unexplored cells
-- $\hat{\sigma}_{\text{max}}$ — the surrogate uncertainty at that cell
+- $\mu_{\text{best, observed}}$ — the best mean observed score across all explored configs
+- $\hat{\mu}_{\text{max}} + \beta \cdot \hat{\sigma}_{\text{max}}$ — the highest UCB across the **entire grid** (explored + unexplored)
 - $\beta$ — same exploration weight as used in UCB (shared hyperparameter)
+
+The denominator covers **all** grid cells, not just unexplored ones. This prevents ESM from being artificially inflated when an explored cell has the highest UCB (e.g. due to high surrogate disagreement on a noisy config). ESM is naturally capped at ≤ 100% whenever the best observed score doesn't exceed the surrogate's most optimistic belief about any config.
 
 Using UCB as the denominator makes ESM **conservative**: it won't claim near-saturation until the surrogate is also confident there is nothing better left. As more top-predicted cells are explored and fail to beat the observed best, $\hat{\mu}_{\text{max}} + \beta \hat{\sigma}_{\text{max}}$ converges downward toward $\mu_{\text{best, observed}}$, driving ESM toward 100%.
 
@@ -61,16 +70,16 @@ Using UCB as the denominator makes ESM **conservative**: it won't claim near-sat
 | 99.9% | 3 | Marginal gain remaining |
 | 99.99% | 4 | Essentially saturated — move on |
 
-**Open question:** What defines the theoretical maximum?
+**Design decision — theoretical maximum:**
 
-The UCB-based denominator ($\hat{\mu}_{\text{max}} + \beta \hat{\sigma}_{\text{max}}$) is the current proposed definition, but alternatives remain under consideration:
-1. **Surrogate mean only:** $\hat{\mu}_{\text{max}}$ — optimistic, may claim saturation too early
-2. **Extrapolation from explored space:** fit a trend line (e.g. performance vs. log-scale regularization) and extrapolate — more conservative, does not require a surrogate
-3. **UCB upper bound (current proposal):** $\hat{\mu}_{\text{max}} + \beta \hat{\sigma}_{\text{max}}$ — conservative, naturally accounts for surrogate uncertainty
+The UCB upper bound ($\max_x \hat{\mu}(x) + \beta \hat{\sigma}(x)$ over all grid cells) was chosen as the denominator. Alternatives considered:
+1. **Surrogate mean only** ($\hat{\mu}_{\text{max}}$) — too optimistic, claims saturation prematurely
+2. **Extrapolation from explored space** — more conservative but requires additional model fitting
+3. **UCB upper bound (chosen)** — conservative, naturally accounts for surrogate uncertainty, and uses the full grid (explored + unexplored) to avoid artificial inflation
 
-The chosen definition should satisfy:
+The chosen definition satisfies:
 - **Monotonically increasing on average** as more of the best-predicted cells are explored
-- **Bounded in [0%, 100%]**
+- **Bounded in [0%, ~100%]** — can slightly exceed 100% if the best observed score surpasses the surrogate's most optimistic prediction, which is a valid signal that exploration is saturated
 - **Unitless and comparable** across different metrics, datasets, and model families
 
 ### Exploration Progress Metric
@@ -97,7 +106,7 @@ In practice this means UCB will assign those configs lower `μ̂` than their tru
 
 ### σ̂ Collapses to Zero on Unseen Cliff Values
 
-When an input value (e.g. `l1=-7.0`) is absent from the training set, all 256 trees route it to the same nearest leaf — every tree agrees, so σ̂ = 0. This means the UCB bonus is zeroed out precisely on the configs where exploration is most needed.
+When an input value (e.g. `l1=-7.0`) is absent from the training set, all 1024 trees route it to the same nearest leaf — every tree agrees, so σ̂ = 0. This means the UCB bonus is zeroed out precisely on the configs where exploration is most needed.
 
 **Leave-cliff-out evaluation results** (`l1 ∈ {-7, -6}` or `l2 ∈ {-6, -5}` held out):
 - Held-out R² = 0.917 — strong on average, but underprediction cluster visible for good-side cliff configs
@@ -129,8 +138,9 @@ The surrogate model feature should be implemented and validated first before the
 
 ## Status
 - [x] Planned
-- [ ] Surrogate model training + prediction
-- [ ] ESM metric definition (theoretical max approach TBD)
-- [ ] Coverage at percentile metric
-- [ ] Stop condition thresholds
-- [ ] Integration with `wandb/sync.py` output as data source
+- [x] Surrogate model training + prediction
+- [x] ESM metric definition (UCB over full grid)
+- [x] Coverage at percentile metric
+- [x] Stop condition thresholds
+- [x] Integration with `wandb/sync.py` output as data source
+- [ ] Distance-to-nearest-explored bonus (documented, not yet implemented)
