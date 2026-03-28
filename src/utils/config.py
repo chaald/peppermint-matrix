@@ -77,36 +77,45 @@ def parse_config(config_str: str) -> Dict:
     run_config = parse_parameters({k: v for k, v in run_config.items() if k != "_wandb"})
     return run_config
 
-def fetch_experiment_runs(filters: Dict[str, Union[int, float, str]]) -> pl.DataFrame:
+def fetch_experiment_runs(
+    filters: Dict[str, Union[int, float, str]],
+    include_summary_metrics: bool = False,
+) -> pl.DataFrame:
     api = wandb.Api() # Initialize Weights & Biases API, used for fetching run data
 
-    query = """
-        query Runs($project: String!, $entity: String!, $cursor: String, $filters: JSONString) {
-            project(name: $project, entityName: $entity) {
-                runs(first: 256, after: $cursor, filters: $filters) {
-                    edges {
-                        node {
+    summary_metrics_field = "summaryMetrics" if include_summary_metrics else ""
+    query = f"""
+        query Runs($project: String!, $entity: String!, $cursor: String, $filters: JSONString) {{
+            project(name: $project, entityName: $entity) {{
+                runs(first: 256, after: $cursor, filters: $filters) {{
+                    edges {{
+                        node {{
                             id
                             name
                             config
-                        }
+                            {summary_metrics_field}
+                        }}
                         cursor
-                    }
-                    pageInfo {
+                    }}
+                    pageInfo {{
                         hasNextPage
                         endCursor
-                    }
-                }
-            }
-        }
+                    }}
+                }}
+            }}
+        }}
     """
     query = gql(query)
 
+    # Top-level W&B filter keys (not config fields) are passed through as-is
+    TOP_LEVEL_FILTER_KEYS = {"state"}
     experiment_runs = []
     cursor = None
-    filters = json.dumps({
-        f"config.{key}": value for key, value in filters.items()
-    })
+    filters_dict = {
+        (key if key in TOP_LEVEL_FILTER_KEYS else f"config.{key}"): value
+        for key, value in filters.items()
+    }
+    filters = json.dumps(filters_dict)
 
     while True:
         variables = {
@@ -122,11 +131,17 @@ def fetch_experiment_runs(filters: Dict[str, Union[int, float, str]]) -> pl.Data
         for edge in runs_data["edges"]:
             current_run = edge["node"]
 
-            experiment_runs.append({
+            run_record = {
                 "id": current_run["id"],
                 "name": current_run["name"],
                 **parse_config(current_run['config']),
-            })
+            }
+
+            if include_summary_metrics and current_run.get("summaryMetrics"):
+                summary = json.loads(current_run["summaryMetrics"])
+                run_record["summary_metrics"] = summary
+
+            experiment_runs.append(run_record)
         
         if not runs_data["pageInfo"]["hasNextPage"]:
             print(f"Fetched {len(experiment_runs)} runs...")

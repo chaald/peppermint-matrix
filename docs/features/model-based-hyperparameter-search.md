@@ -145,7 +145,17 @@ Key components:
 
 ### State Filtering in `fetch_experiment_runs`
 
-Add an optional `state` parameter to `fetch_experiment_runs` (default `None` for backward compatibility). When provided, includes `"state": state` in the GraphQL `filters` JSON alongside the existing `config.*` filters. `model_based_parse_params` passes `state="finished"`.
+`state` is treated as a top-level W&B filter key (not a `config.*` field) and can be passed directly in the `filters` dict. Any key in `filters` that matches a known top-level W&B field (`state`) is passed through without the `config.` prefix; all other keys are prefixed as before. This keeps the interface simple — callers own the full filter dict:
+
+```python
+# As used by model_based_parse_params
+fetch_experiment_runs(
+    {**fixed_parameters, "state": "finished"},
+    include_summary_metrics=True,
+)`
+```
+
+Existing callers that don't pass `state` are unaffected.
 
 ### Decision Log — Repo Root
 
@@ -219,7 +229,7 @@ Each call to `model_based_parse_params` appends one row to `hyperparameter_searc
 
 - [x] Planned
 - [x] Implementation details documented
-- [ ] Extend `fetch_experiment_runs` — add `summaryMetrics` to GraphQL query + optional `state` filter
+- [x] Extend `fetch_experiment_runs` — add `summaryMetrics` to GraphQL query + optional `state` filter
 - [ ] Validate `summaryMetrics` reliability — notebook in `notebooks/parameter_analysis/` comparing `summaryMetrics` values against best-epoch values from `wandb/summary.parquet` across all finished runs; quantify how many runs have NaN or degraded last-epoch scores due to loss explosion; decide whether to proceed with `summaryMetrics` or revise the data source
 - [ ] CLI arg wiring — add `--model_based_beta`, `--model_based_target`, `--model_based_estimator_count` to `hyperparameter_search.py`; extend validation; pass through `compile_config` → `load_config`
 - [ ] `model_based_parse_params` skeleton — parameter parsing (fixed/categorical/random split), extend `load_config` with `**kwargs` dispatch
