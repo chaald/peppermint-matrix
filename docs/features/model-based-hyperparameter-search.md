@@ -102,15 +102,14 @@ query Runs(...) {
 
 **Performance:** This is the same single paginated GraphQL query used by `fetch_experiment_runs` today, with one additional field per run. No extra API calls. The ~40 second latency matches the existing `exhaustive_parse_parameters` cost.
 
-**Best-epoch vs. last-epoch:** `summaryMetrics` contains W&B's summary values (typically the last logged value per metric). This is problematic for runs where the loss exploded — the last logged metric values may be `NaN` or severely degraded, while the actual best performance occurred at an earlier epoch. Since the current `main.py` does not enforce early stopping or checkpointing by default, this is a real concern.
+**Best-epoch vs. last-epoch:** `summaryMetrics` contains W&B's summary values (the last logged value per metric). Validation in `notebooks/sandbox/summary_metrics_validation.ipynb` confirmed this is **not reliable** as a surrogate training signal:
+- 93.6% of runs are degraded at last epoch vs. their best epoch
+- Mean relative gap is 16.68% of the best-epoch value
+- A top-left cluster of runs peaked at recall@20 ≈ 0.03–0.05 but collapsed to near-zero by the final epoch — these would poison the surrogate with near-zero targets for genuinely good configurations
 
-For the initial implementation, `summaryMetrics` is used for speed. A **validation task** is included in the status checklist to compare `summaryMetrics` values against `history()`-derived best-epoch values (from `wandb/summary.parquet`) across all finished runs. The outcome determines whether:
-- `summaryMetrics` is reliable enough (most runs don't explode, or NaN rows are few enough to filter out)
-- The approach needs to be revised to fetch `history()` per run, or to use the local parquet cache as a fallback for metric values
+**Decision: use `best:epoch/test_recall@20` from `wandb/summary.parquet` as the surrogate training target.** This requires that `sync.py` has been run with `--sorting_criterion epoch/test_recall@20` (or a composite that includes it) so the `best:` epoch is chosen to maximise recall@20.
 
-This validation should be done **before** the surrogate pipeline is ported, since the quality of the training signal directly affects UCB decisions.
-
-**Target metric naming:** The `--model_based_target` CLI argument specifies the metric key as it appears in `summaryMetrics` (e.g. `epoch/test_recall@10`). This differs from the `best:epoch/test_recall@10` naming used in `wandb/summary.parquet` — the `best:` prefix is a `sync.py` convention, not a W&B native key.
+**Target metric naming:** The `--model_based_target` CLI argument specifies the metric key as it appears in `wandb/summary.parquet` with the `best:epoch/` prefix (e.g. `best:epoch/test_recall@20`). The `best:` prefix is a `sync.py` convention.
 
 ### Interface — Extending `load_config`
 
@@ -230,7 +229,7 @@ Each call to `model_based_parse_params` appends one row to `hyperparameter_searc
 - [x] Planned
 - [x] Implementation details documented
 - [x] Extend `fetch_experiment_runs` — add `summaryMetrics` to GraphQL query + optional `state` filter
-- [ ] Validate `summaryMetrics` reliability — notebook in `notebooks/parameter_analysis/` comparing `summaryMetrics` values against best-epoch values from `wandb/summary.parquet` across all finished runs; quantify how many runs have NaN or degraded last-epoch scores due to loss explosion; decide whether to proceed with `summaryMetrics` or revise the data source
+- [x] Validate `summaryMetrics` reliability — notebook in `notebooks/sandbox/summary_metrics_validation.ipynb`. **Verdict: use parquet.** 93.6% of runs are degraded at last epoch; mean relative gap is 16.68%; scatter plot shows a top-left cluster of runs that peaked at recall@20 ≈ 0.03–0.05 but collapsed to near-zero by the final epoch. Training the surrogate on `summaryMetrics` targets would corrupt the training signal for those runs. **Data source: `best:epoch/test_recall@20` from `wandb/summary.parquet`.**
 - [ ] CLI arg wiring — add `--model_based_beta`, `--model_based_target`, `--model_based_estimator_count` to `hyperparameter_search.py`; extend validation; pass through `compile_config` → `load_config`
 - [ ] `model_based_parse_params` skeleton — parameter parsing (fixed/categorical/random split), extend `load_config` with `**kwargs` dispatch
 - [ ] Port surrogate pipeline — `RegularizationLogTransformer` + `RandomForestRegressor` Pipeline from notebook into `src/utils/config.py`

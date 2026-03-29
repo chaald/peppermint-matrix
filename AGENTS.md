@@ -67,6 +67,28 @@ runs.select("run_id", "run_name", "embedding_dimension", "l2_regularization")
 
 ---
 
+---
+
+## Coding Style
+
+### DataFrame naming
+
+Do **not** use a `df_` prefix for DataFrame variables. Use descriptive names instead.
+
+```python
+# Good
+live_runs = fetch_experiment_runs(...)
+parquet_runs = pl.read_parquet(...)
+full_dataframe = ...
+train_dataframe = ...
+
+# Bad
+df_live_runs = fetch_experiment_runs(...)
+df_parquet = pl.read_parquet(...)
+```
+
+---
+
 ### Direct W&B API access
 
 For ad-hoc querying, use the W&B public API directly:

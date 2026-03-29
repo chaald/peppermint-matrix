@@ -92,6 +92,7 @@ def fetch_experiment_runs(
                         node {{
                             id
                             name
+                            displayName
                             config
                             {summary_metrics_field}
                         }}
@@ -126,8 +127,9 @@ def fetch_experiment_runs(
             current_run = edge["node"]
 
             run_record = {
-                "id": current_run["id"],
-                "name": current_run["name"],
+                "node_id": current_run["id"],
+                "run_id": current_run["name"],
+                "run_name": current_run["displayName"],
                 **parse_config(current_run['config']),
             }
 
