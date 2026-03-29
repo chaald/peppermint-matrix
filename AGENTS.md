@@ -33,13 +33,19 @@ Use this whenever you need to programmatically check which runs have already bee
 from src.utils.config import fetch_experiment_runs
 
 # Get all runs for a given model
-runs = fetch_experiment_runs({"model": "matrix_factorization"})
+runs = fetch_experiment_runs({"config.model": "matrix_factorization"})
 
 # Narrow down by any combination of fixed config values
 runs = fetch_experiment_runs({
-    "model": "matrix_factorization",
-    "embedding_dimension": 64,
-    "l2_regularization": 1e-6,
+    "config.model": "matrix_factorization",
+    "config.embedding_dimension": 64,
+    "config.l2_regularization": 1e-6,
+})
+
+# Filter by run state (top-level W&B field, no config. prefix)
+runs = fetch_experiment_runs({
+    "config.model": "matrix_factorization",
+    "state": "finished",
 })
 
 # runs is a polars.DataFrame — one row per matching run
@@ -49,7 +55,7 @@ runs.select("run_id", "run_name", "embedding_dimension", "l2_regularization")
 ```
 
 **What it does:**
-- Queries W&B via GraphQL, filtering by `config.<key> = value` for each key in the `filters` dict
+- Queries W&B via GraphQL. Filter keys are passed through as-is — the caller is responsible for the correct prefix (`config.` for hyperparameter fields, none for top-level W&B fields like `state`)
 - Returns a `polars.DataFrame` with one row per matching run and all config parameters as columns
 - Paginates automatically (256 runs per page)
 - Does **not** fetch metric history — configs only (fast)

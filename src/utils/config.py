@@ -107,15 +107,9 @@ def fetch_experiment_runs(
     """
     query = gql(query)
 
-    # Top-level W&B filter keys (not config fields) are passed through as-is
-    TOP_LEVEL_FILTER_KEYS = {"state"}
     experiment_runs = []
     cursor = None
-    filters_dict = {
-        (key if key in TOP_LEVEL_FILTER_KEYS else f"config.{key}"): value
-        for key, value in filters.items()
-    }
-    filters = json.dumps(filters_dict)
+    filters = json.dumps(filters)
 
     while True:
         variables = {
@@ -178,7 +172,7 @@ def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
     free_categorical_parameters = dict(sorted(free_categorical_parameters.items(), key=lambda x: len(x[1]), reverse=True))
 
     # Get latest experiment runs to count existing configurations
-    experiment_runs = fetch_experiment_runs(fixed_parameters)
+    experiment_runs = fetch_experiment_runs({f"config.{k}": v for k, v in fixed_parameters.items()})
 
     # Pick the least explored categorical configuration
     categorical_parameter_names = list(free_categorical_parameters.keys())

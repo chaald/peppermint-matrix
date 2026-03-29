@@ -145,17 +145,17 @@ Key components:
 
 ### State Filtering in `fetch_experiment_runs`
 
-`state` is treated as a top-level W&B filter key (not a `config.*` field) and can be passed directly in the `filters` dict. Any key in `filters` that matches a known top-level W&B field (`state`) is passed through without the `config.` prefix; all other keys are prefixed as before. This keeps the interface simple — callers own the full filter dict:
+`fetch_experiment_runs` passes all filter keys through to the GraphQL query as-is — the caller is responsible for the correct key format. Hyperparameter config fields use the `config.` prefix; top-level W&B fields like `state` do not:
 
 ```python
 # As used by model_based_parse_params
 fetch_experiment_runs(
-    {**fixed_parameters, "state": "finished"},
+    {f"config.{k}": v for k, v in fixed_parameters.items()} | {"state": "finished"},
     include_summary_metrics=True,
-)`
+)
 ```
 
-Existing callers that don't pass `state` are unaffected.
+`exhaustive_parse_parameters` already prefixes its `fixed_parameters` keys with `config.` at the call site, so its behaviour is unchanged.
 
 ### Decision Log — Repo Root
 
