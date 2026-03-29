@@ -133,7 +133,11 @@ def fetch_experiment_runs(
 
             if include_summary_metrics and current_run.get("summaryMetrics"):
                 summary = json.loads(current_run["summaryMetrics"])
-                run_record["summary_metrics"] = summary
+                rename_map = {"_runtime": "runtime", "_step": "step", "_timestamp": "timestamp"}
+                for key, value in summary.items():
+                    if key == "_wandb":
+                        continue
+                    run_record[rename_map.get(key, key)] = value
 
             experiment_runs.append(run_record)
         
