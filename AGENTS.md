@@ -1,95 +1,26 @@
 # AGENTS.md
 
-This file contains guidance for AI agents working in this repository.
+## Repo Facts
+- Python 3.12+; use `uv` for env/dependency management (`uv sync`, then `uv run ...`).
+- `main.py` is the single-run trainer.
+- `hyperparameter_search.py` launches parallel sweep workers.
+- `main.py` currently always loads `dataset/yelp2018/train.txt` and `dataset/yelp2018/test.txt`; dataset choice is hardcoded there, not driven by config.
 
----
+## Config And Runs
+- Config precedence is `configs/default.yaml` -> `--config` YAML -> CLI flags.
+- `--method=random|exhaustive` only matters when the YAML has a `parameters` block.
+- `exhaustive` search uses W&B history through `src.utils.config.fetch_experiment_runs(...)` to pick the least-explored categorical config.
+- Use `--tracker=disabled` for local runs that should not touch W&B.
 
-## Documenting New Features
+## Commands
+- `uv run python main.py --help`
+- `uv run python main.py --tracker=disabled --model=matrix_factorization --max_epoch=5`
+- `uv run python hyperparameter_search.py --method=random --config=<path>`
+- `uv run pytest`
+- `uv run pytest tests/test_main.py` or `uv run pytest tests/test_main.py -k <pattern>` for focused checks
 
-Whenever a new feature is being developed, create a documentation file for it in `docs/features/`.
-
-### Steps
-
-1. Create `docs/features/<feature-name>.md` using the template in [`docs/features/README.md`](docs/features/README.md).
-2. Add a corresponding row to the **Feature Index** table in [`docs/features/README.md`](docs/features/README.md).
-
-### Feature Index (in `docs/features/README.md`)
-
-Keep this table up to date as features are added:
-
-| Feature | File | Date Added | Status |
-|---------|------|------------|--------|
-| Example | [example.md](docs/features/example.md) | 2026-03-15 | In progress |
-
----
-
-## Fetching Previous Runs and Configurations from W&B
-
-### Primary method — `fetch_experiment_runs` in `src/utils/config.py`
-
-Use this whenever you need to programmatically check which runs have already been completed and what configurations they used.
-
-```python
-from src.utils.config import fetch_experiment_runs
-
-# Get all runs for a given model
-runs = fetch_experiment_runs({"model": "matrix_factorization"})
-
-# Narrow down by any combination of fixed config values
-runs = fetch_experiment_runs({
-    "model": "matrix_factorization",
-    "embedding_dimension": 64,
-    "l2_regularization": 1e-6,
-})
-
-# runs is a polars.DataFrame — one row per matching run
-print(runs.columns)           # all config fields + run_id, run_name
-print(runs.shape)             # (n_runs, n_columns)
-runs.select("run_id", "run_name", "embedding_dimension", "l2_regularization")
-```
-
-**What it does:**
-- Queries W&B via GraphQL, filtering by `config.<key> = value` for each key in the `filters` dict
-- Returns a `polars.DataFrame` with one row per matching run and all config parameters as columns
-- Paginates automatically (256 runs per page)
-- Does **not** fetch metric history — configs only (fast)
-
-**When to use this:**
-- Before proposing a new experiment — check if the configuration already exists
-- To understand what hyperparameter values have been tried
-- To count how many runs used a specific parameter combination
-
----
-
-### Direct W&B API access
-
-For ad-hoc querying, use the W&B public API directly:
-
-```python
-import wandb
-from src.constant import PROJECT_NAME
-
-api = wandb.Api()
-
-# List all runs for the project
-runs = api.runs(f"{api.default_entity}/{PROJECT_NAME}")
-
-for run in runs:
-    print(run.id, run.name, run.state)
-    print(run.config)         # dict of hyperparameters
-    print(run.summary)        # final/summary metrics
-    df = run.history()        # per-step metric history as a DataFrame
-```
-
-Useful filters:
-```python
-# Filter by state and config value
-runs = api.runs(
-    f"{api.default_entity}/{PROJECT_NAME}",
-    filters={
-        "state": "finished",
-        "config.model": "matrix_factorization",
-        "config.embedding_dimension": 64,
-    }
-)
-```
+## Workflow
+- Check prior runs with `src.utils.config.fetch_experiment_runs(filters)` before starting a new experiment.
+- `hyperparameter_search.py` staggers worker startup by 60 seconds for `exhaustive`; keep that unless you verify the race is gone.
+- Saved models go under `models/{model}/{sweep_id}/{run_id}/`; `models/` and `wandb/` are ignored by git.
+- When working on a new feature, consult `docs/features/README.md`, create `docs/features/<feature-name>.md`, and update the Feature Index.
