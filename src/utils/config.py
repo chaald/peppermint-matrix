@@ -77,36 +77,40 @@ def parse_config(config_str: str) -> Dict:
     run_config = parse_parameters({k: v for k, v in run_config.items() if k != "_wandb"})
     return run_config
 
-def fetch_experiment_runs(filters: Dict[str, Union[int, float, str]]) -> pl.DataFrame:
+def fetch_experiment_runs(
+    filters: Dict[str, Union[int, float, str]],
+    include_summary_metrics: bool = False,
+) -> pl.DataFrame:
     api = wandb.Api() # Initialize Weights & Biases API, used for fetching run data
 
-    query = """
-        query Runs($project: String!, $entity: String!, $cursor: String, $filters: JSONString) {
-            project(name: $project, entityName: $entity) {
-                runs(first: 256, after: $cursor, filters: $filters) {
-                    edges {
-                        node {
+    summary_metrics_field = "summaryMetrics" if include_summary_metrics else ""
+    query = f"""
+        query Runs($project: String!, $entity: String!, $cursor: String, $filters: JSONString) {{
+            project(name: $project, entityName: $entity) {{
+                runs(first: 256, after: $cursor, filters: $filters) {{
+                    edges {{
+                        node {{
                             id
                             name
+                            displayName
                             config
-                        }
+                            {summary_metrics_field}
+                        }}
                         cursor
-                    }
-                    pageInfo {
+                    }}
+                    pageInfo {{
                         hasNextPage
                         endCursor
-                    }
-                }
-            }
-        }
+                    }}
+                }}
+            }}
+        }}
     """
     query = gql(query)
 
     experiment_runs = []
     cursor = None
-    filters = json.dumps({
-        f"config.{key}": value for key, value in filters.items()
-    })
+    filters = json.dumps(filters)
 
     while True:
         variables = {
@@ -122,11 +126,22 @@ def fetch_experiment_runs(filters: Dict[str, Union[int, float, str]]) -> pl.Data
         for edge in runs_data["edges"]:
             current_run = edge["node"]
 
-            experiment_runs.append({
-                "id": current_run["id"],
-                "name": current_run["name"],
+            run_record = {
+                "node_id": current_run["id"],
+                "run_id": current_run["name"],
+                "run_name": current_run["displayName"],
                 **parse_config(current_run['config']),
-            })
+            }
+
+            if include_summary_metrics and current_run.get("summaryMetrics"):
+                summary = json.loads(current_run["summaryMetrics"])
+                rename_map = {"_runtime": "runtime", "_step": "step", "_timestamp": "timestamp"}
+                for key, value in summary.items():
+                    if key == "_wandb":
+                        continue
+                    run_record[rename_map.get(key, key)] = value
+
+            experiment_runs.append(run_record)
         
         if not runs_data["pageInfo"]["hasNextPage"]:
             print(f"Fetched {len(experiment_runs)} runs...")
@@ -163,7 +178,7 @@ def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
     free_categorical_parameters = dict(sorted(free_categorical_parameters.items(), key=lambda x: len(x[1]), reverse=True))
 
     # Get latest experiment runs to count existing configurations
-    experiment_runs = fetch_experiment_runs(fixed_parameters)
+    experiment_runs = fetch_experiment_runs({f"config.{k}": v for k, v in fixed_parameters.items()})
 
     # Pick the least explored categorical configuration
     categorical_parameter_names = list(free_categorical_parameters.keys())

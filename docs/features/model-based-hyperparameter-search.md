@@ -43,13 +43,17 @@ The corresponding resolver in `src/utils/config.py` (`model_based_parse_params`)
 
 ### Workflow per Worker Call
 
-1. Fetch all completed runs for the fixed parameters via `fetch_experiment_runs`
-2. Fit the Random Forest surrogate on `(config → target_metric)`
-3. Enumerate all cells in the categorical parameter space
-4. Compute UCB score for **every cell** (explored and unexplored)
-5. Return the config with the highest UCB score across the full grid
+1. Fetch all **finished** runs for the fixed parameters via `fetch_experiment_runs` (GraphQL with `summaryMetrics` + `state: "finished"` filter)
+2. Extract the target metric value from each run's `summaryMetrics` JSON; aggregate duplicate configs with `.mean()`
+3. If < 20 runs have valid target metric values → fall back to random sampling with a warning
+4. Fit the Random Forest surrogate pipeline (`RegularizationLogTransformer` → `RandomForestRegressor`) on `(config → target_metric)`
+5. Enumerate all cells in the categorical parameter space
+6. Compute UCB score for **every cell** (explored and unexplored) using per-tree predictions for $\hat{\mu}$ and $\hat{\sigma}$
+7. Compute and log ESM + Coverage@75 to stdout
+8. Append the selected config's decision metadata to `hyperparameter_search.log.csv`
+9. Return the config with the highest UCB score across the full grid (random tie-breaking)
 
-Steps 1–4 replace the current W&B round-trip + argmin logic in `exhaustive_parse_parameters`. The ~40 second startup cost is similar.
+Steps 1–9 replace the current W&B round-trip + argmin logic in `exhaustive_parse_parameters`. The ~40 second startup cost is similar.
 
 Scoring the full grid (rather than filtering to unexplored cells first) means the surrogate can re-run a config if it genuinely has the highest UCB — e.g. a config with observed high variance, or one where the surrogate's uncertainty is elevated due to few repeated runs.
 
@@ -68,12 +72,106 @@ Scoring the full grid (rather than filtering to unexplored cells first) means th
 - **Too few runs to fit reliably (e.g. < 20):** fall back to random sampling with a warning
 - **Tie-breaking:** if multiple cells have equal UCB scores, pick randomly among them
 
+## Implementation Details
+
+### Data Source — Live W&B API with Metric Fetching
+
+Each call to `model_based_parse_params` queries the W&B API **directly** (not the local `wandb/summary.parquet`). This ensures the surrogate sees newly completed runs in real time, which is critical because `hyperparameter_search.py` runs multiple workers concurrently and each worker's decision should reflect the latest state.
+
+**Approach:** Extend the existing `fetch_experiment_runs` GraphQL query to also request the `summaryMetrics` field on each run node. This field is a JSON string containing the run's summary metrics (including per-epoch metrics logged by `WandbMetricsLogger`). The target metric value is extracted from this JSON per run.
+
+The GraphQL query also adds a `state: "finished"` filter so only completed runs are returned. This avoids training the surrogate on partial/crashed runs.
+
+```graphql
+query Runs(...) {
+    project(name: $project, entityName: $entity) {
+        runs(first: 256, after: $cursor, filters: $filters) {
+            edges {
+                node {
+                    id
+                    name
+                    config
+                    summaryMetrics   # ← new field
+                }
+            }
+            ...
+        }
+    }
+}
+```
+
+**Performance:** This is the same single paginated GraphQL query used by `fetch_experiment_runs` today, with one additional field per run. No extra API calls. The ~40 second latency matches the existing `exhaustive_parse_parameters` cost.
+
+**Best-epoch vs. last-epoch:** `summaryMetrics` contains W&B's summary values (the last logged value per metric). Validation in `notebooks/sandbox/summary_metrics_validation.ipynb` confirmed this is **not reliable** as a surrogate training signal:
+- 93.6% of runs are degraded at last epoch vs. their best epoch
+- Mean relative gap is 16.68% of the best-epoch value
+- A top-left cluster of runs peaked at recall@20 ≈ 0.03–0.05 but collapsed to near-zero by the final epoch — these would poison the surrogate with near-zero targets for genuinely good configurations
+
+**Decision: use `best:epoch/test_recall@20` from `wandb/summary.parquet` as the surrogate training target.** This requires that `sync.py` has been run with `--sorting_criterion epoch/test_recall@20` (or a composite that includes it) so the `best:` epoch is chosen to maximise recall@20.
+
+**Target metric naming:** The `--model_based_target` CLI argument specifies the metric key as it appears in `wandb/summary.parquet` with the `best:epoch/` prefix (e.g. `best:epoch/test_recall@20`). The `best:` prefix is a `sync.py` convention.
+
+### Interface — Extending `load_config`
+
+Extend `load_config` in `src/utils/config.py` to accept `**kwargs` that are forwarded to the method-specific resolver:
+
+```python
+def load_config(config_path: str, method: Literal["random", "exhaustive", "model_based"] = "random", **kwargs) -> Dict:
+    ...
+    if method == "model_based":
+        current_run_config.update(model_based_parse_params(config["parameters"], **kwargs))
+    ...
+```
+
+`model_based_parse_params` follows the same interface as `exhaustive_parse_parameters`:
+- **Input:** `parameters_config` dict (the `parameters:` block from the YAML config) + keyword arguments (`beta`, `target_metric`, `estimator_count`)
+- **Output:** a single resolved config dict (one value per parameter)
+
+The caller chain: `compile_config(args)` → `load_config(config_path, method, **model_based_kwargs)` → `model_based_parse_params(parameters_config, ...)`.
+
+`compile_config` in `main.py` extracts the model-based CLI args and passes them as kwargs to `load_config`.
+
+### Surrogate Pipeline — Ported from Notebook
+
+The `RegularizationLogTransformer` and sklearn `Pipeline` are ported from `notebooks/parameter_analysis/surrogate_model.ipynb` into `src/utils/config.py` (co-located with `model_based_parse_params`).
+
+Key components:
+- **`RegularizationLogTransformer`** — `BaseEstimator` + `TransformerMixin` that log₁₀-transforms `l1_regularization` and `l2_regularization` columns (zero → sentinel `-15.0`, else `round(log10(x), 1)`)
+- **`Pipeline`** — `[("log_reg", RegularizationLogTransformer(...)), ("rf", RandomForestRegressor(...))]`
+- **RF hyperparameters:** `n_estimators` from `--model_based_estimator_count` (default 1024), `max_features="sqrt"`, `max_samples=0.1`, `min_samples_leaf=3`, `n_jobs=-1`, `random_state=42`
+- **Feature names:** derived from the categorical parameters in the config (same as `exhaustive_parse_parameters` does for its `free_categorical_parameters`)
+- **Duplicate-run aggregation:** multiple runs with the same categorical config are `.mean()`-aggregated before fitting. This is consistent with the notebook approach
+
+### State Filtering in `fetch_experiment_runs`
+
+`fetch_experiment_runs` passes all filter keys through to the GraphQL query as-is — the caller is responsible for the correct key format. Hyperparameter config fields use the `config.` prefix; top-level W&B fields like `state` do not:
+
+```python
+# As used by model_based_parse_params
+fetch_experiment_runs(
+    {f"config.{k}": v for k, v in fixed_parameters.items()} | {"state": "finished"},
+    include_summary_metrics=True,
+)
+```
+
+`exhaustive_parse_parameters` already prefixes its `fixed_parameters` keys with `config.` at the call site, so its behaviour is unchanged.
+
+### Decision Log — Repo Root
+
+`hyperparameter_search.log.csv` is written to the repository root directory. The file is append-only with one row per `model_based_parse_params` call. Concurrent workers append independently (file-level append atomicity is sufficient on Linux for single-line CSV writes).
+
+### ESM Logging
+
+At the start of each `model_based_parse_params` call, after fitting the surrogate and computing the full-grid UCB scores, the ESM and Coverage@75 metrics are computed and:
+- **Printed to stdout** — provides a running trace of exploration saturation as workers execute
+- **Written to `hyperparameter_search.log.csv`** — the `esm` and `coverage_75` columns on each row capture the global surrogate state at the moment the config was selected, enabling post-hoc analysis of saturation progression over time
+
 ## Relationship to Surrogate Model Feature
 
 This feature **depends on** the surrogate model feature ([surrogate-model.md](surrogate-model.md)):
-- Reuses the same Random Forest fitting logic
-- Reuses `fetch_experiment_runs` as the data source
-- The ERG metric from the surrogate feature can be logged at the start of each model-based worker call to track exploration progress over time
+- Reuses the same Random Forest fitting logic (ported from `notebooks/parameter_analysis/surrogate_model.ipynb`)
+- Reuses `fetch_experiment_runs` as the data source (extended with `summaryMetrics` and state filtering)
+- The ESM metric from the surrogate feature is logged at the start of each model-based worker call to track exploration progress over time
 
 ## Usage
 
@@ -110,6 +208,8 @@ Each call to `model_based_parse_params` appends one row to `hyperparameter_searc
 | `predicted_mu` | float | Surrogate mean prediction $\hat{\mu}$ for this config |
 | `predicted_sigma` | float | Surrogate uncertainty $\hat{\sigma}$ (std across trees) for this config |
 | `ucb` | float | Predicted UCB score: $\hat{\mu} + \beta \cdot \hat{\sigma}$ |
+| `esm` | float | Exploration Saturation Metric (%) at the time of the call |
+| `coverage_75` | float | Coverage at the 75th percentile (%) at the time of the call |
 
 **Notes:**
 - The file is append-only; one row per `model_based_parse_params` call regardless of which worker produced it.
@@ -122,13 +222,21 @@ Each call to `model_based_parse_params` appends one row to `hyperparameter_searc
 - **Multi-worker race conditions:** Multiple workers will independently pick the same top UCB cell if run in parallel. Need a locking mechanism or a "batch UCB" strategy (pick top-$k$ diverse cells for $k$ workers). The current 60-second stagger partially mitigates this but doesn't solve it.
 - **Target metric:** Should UCB optimise a single metric or a weighted composite (same format as `--sorting_criterion` in `sync.py`)?
 
-## Status
+## Task Status
+
+> **Workflow:** Tasks are implemented one at a time in order. Each task is submitted for review before the next one begins. Do not proceed to the next task until the current one is reviewed and approved.
+
 - [x] Planned
-- [ ] `model_based_parse_params` skeleton + arg wiring (`--model_based_beta`, `--model_based_target`, `--model_based_estimator_count`)
-- [ ] Surrogate pipeline fit (`RegularizationLogTransformer` + `RandomForestRegressor`)
-- [ ] Full-grid UCB scoring and argmax selection
+- [x] Implementation details documented
+- [x] Extend `fetch_experiment_runs` — add `summaryMetrics` to GraphQL query + optional `state` filter
+- [x] Validate `summaryMetrics` reliability — notebook in `notebooks/sandbox/summary_metrics_validation.ipynb`. **Verdict: use parquet.** 93.6% of runs are degraded at last epoch; mean relative gap is 16.68%; scatter plot shows a top-left cluster of runs that peaked at recall@20 ≈ 0.03–0.05 but collapsed to near-zero by the final epoch. Training the surrogate on `summaryMetrics` targets would corrupt the training signal for those runs. **Data source: `best:epoch/test_recall@20` from `wandb/summary.parquet`.**
+- [ ] CLI arg wiring — add `--model_based_beta`, `--model_based_target`, `--model_based_estimator_count` to `hyperparameter_search.py`; extend validation; pass through `compile_config` → `load_config`
+- [ ] `model_based_parse_params` skeleton — parameter parsing (fixed/categorical/random split), extend `load_config` with `**kwargs` dispatch
+- [ ] Port surrogate pipeline — `RegularizationLogTransformer` + `RandomForestRegressor` Pipeline from notebook into `src/utils/config.py`
+- [ ] Full-grid UCB scoring — enumerate categorical space, compute per-tree $\hat{\mu}$/$\hat{\sigma}$, argmax with random tie-breaking
 - [ ] Fallback: cold start (no runs → random)
 - [ ] Fallback: sparse data (< 20 runs → random with warning)
-- [ ] Decision log append (`hyperparameter_search.log.csv`)
+- [ ] ESM + Coverage@75 logging to stdout
+- [ ] Decision log append (`hyperparameter_search.log.csv` at repo root)
 - [ ] Multi-worker deduplication strategy
 - [ ] Integration tests

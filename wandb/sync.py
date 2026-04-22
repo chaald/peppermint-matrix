@@ -218,9 +218,10 @@ def main(
         
     # Tag run as available locally if the model files exist
     local_run_ids = []
-    local_sweep_ids = os.listdir(f"./models/{model}/")
-    for sweep_id in local_sweep_ids:
-        local_run_ids.extend([run_id for run_id in os.listdir(f"./models/{model}/{sweep_id}/")])
+    if os.path.isdir(f"./models/{model}/"):
+        local_sweep_ids = os.listdir(f"./models/{model}/")
+        for sweep_id in local_sweep_ids:
+            local_run_ids.extend([run_id for run_id in os.listdir(f"./models/{model}/{sweep_id}/")])
         
     experiment_runs = experiment_runs.with_columns(
         available_locally=pl.col("run_id").is_in(local_run_ids)
