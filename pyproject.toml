@@ -29,3 +29,8 @@ filterwarnings = [
     "ignore::FutureWarning",
     "ignore::DeprecationWarning",
 ]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.408",
+]
