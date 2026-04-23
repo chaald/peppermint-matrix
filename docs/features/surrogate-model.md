@@ -8,6 +8,8 @@ A Random Forest surrogate model trained on completed W&B runs that serves two pu
 1. **Predict** the expected evaluation score (e.g. `test_recall@10`) for any unexplored parameter combination
 2. **Quantify exploration saturation** — a single metric that signals when a parameter sub-space has been sufficiently explored and it is time to move on
 
+The working implementation lives in `notebooks/parameter_analysis/surrogate_model.ipynb` and serves as the reference notebook for the surrogate pipeline, evaluation, and ESM calculations.
+
 ## Motivation
 
 With 3382+ completed runs covering only ~7.58% of the joint hyperparameter space, there is no principled way to answer:
@@ -139,7 +141,7 @@ The surrogate model feature should be implemented and validated first before the
 
 ## Status
 - [x] Planned
-- [x] Surrogate model training + prediction
+- [x] Surrogate model training + prediction (implemented in `notebooks/parameter_analysis/surrogate_model.ipynb`)
 - [x] ESM metric definition (UCB over full grid)
 - [x] Coverage at percentile metric
 - [x] Stop condition thresholds
