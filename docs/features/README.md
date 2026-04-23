@@ -16,7 +16,7 @@ docs/features/
 
 | Feature | File | Date Added | Status |
 |---------|------|------------|--------|
-| Surrogate Model & Exploration Saturation Metric | [surrogate-model.md](surrogate-model.md) | 2026-03-15 | Planned |
+| Surrogate Model & Exploration Saturation Metric | [surrogate-model.md](surrogate-model.md) | 2026-03-15 | Implemented in notebook |
 | Model-Based Hyperparameter Search | [model-based-hyperparameter-search.md](model-based-hyperparameter-search.md) | 2026-03-15 | Planned |
 
 ## Template

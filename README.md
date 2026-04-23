@@ -269,6 +269,27 @@ python main.py --tracker=disabled --model=matrix_factorization --max_epoch=5
 
 `hyperparameter_search.py` launches parallel workers to run multiple training jobs across a sweep. Each worker runs independently.
 
+### Typical training command
+
+This is the command we usually use to train the matrix factorization model with embedding dropout:
+
+```bash
+python hyperparameter_search.py \
+    --method=exhaustive \
+    --config=configs/hyperparameter_search/mf:embedding_dropout.yaml \
+    --nworker=4 \
+    --nruns=16
+```
+
+What it does:
+
+- `--method=exhaustive` selects the least-explored categorical configuration from the search space
+- `--config=configs/hyperparameter_search/mf:embedding_dropout.yaml` loads the matrix factorization + embedding dropout sweep definition
+- `--nworker=4` starts up to 4 workers in parallel
+- `--nruns=16` makes each worker run 16 training jobs
+
+In total, this command schedules up to 64 training runs, depending on worker availability and completion timing.
+
 ### Arguments
 
 | Argument | Default | Description |
@@ -304,9 +325,9 @@ python hyperparameter_search.py \
 ```bash
 python hyperparameter_search.py \
     --method=exhaustive \
-    --config=configs/hyperparameter_search/mf:elasticnet.yaml \
+    --config=configs/hyperparameter_search/mf:embedding_dropout.yaml \
     --nworker=4 \
-    --nruns=8
+    --nruns=16
 ```
 
 **Note:** Workers are staggered with a 60-second delay between starts to avoid race conditions during exhaustive search state recording.
@@ -366,3 +387,7 @@ python wandb/sync.py \
 ```
 
 `--sorting_criterion` accepts one or more `metric:weight` pairs to define a weighted composite score. For each run, the epoch with the highest composite score is selected as the best checkpoint, and its metrics are used to represent that run in the summary.
+
+### Surrogate model notebook
+
+The implemented surrogate model lives in `notebooks/parameter_analysis/surrogate_model.ipynb`. It trains a Random Forest on `wandb/summary.parquet`, evaluates the surrogate, and computes the ESM / coverage metrics used in the feature docs.
