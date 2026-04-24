@@ -5,6 +5,23 @@
       "type": "local",
       "command": ["uvx", "mcp-server-git"],
       "enabled": true
+    },
+    "jupyter": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "jupyter-mcp-server@latest",
+        "start",
+        "--transport",
+        "stdio"
+      ],
+      "environment": {
+        "JUPYTER_URL": "{env:JUPYTER_URL}",
+        "JUPYTER_TOKEN": "{env:JUPYTER_TOKEN}",
+        "MCP_TOKEN": "{env:MCP_TOKEN}",
+        "ALLOW_IMG_OUTPUT": "true"
+      },
+      "enabled": true
     }
   },
   "lsp": {

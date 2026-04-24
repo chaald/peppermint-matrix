@@ -24,6 +24,18 @@
 - `hyperparameter_search.py` staggers worker startup by 60 seconds for `exhaustive`; keep that unless you verify the race is gone.
 - Saved models go under `models/{model}/{sweep_id}/{run_id}/`; `models/` and `wandb/` are ignored by git.
 - When working on a new feature, consult `docs/features/README.md`, create `docs/features/<feature-name>.md`, and update the Feature Index.
+
+## Jupyter MCP
+- The repo includes a local Jupyter MCP setup for OpenCode via `opencode.json`.
+- Load `.env` before starting OpenCode or JupyterLab: `set -a; source .env; set +a`.
+- Start JupyterLab from the repo `.venv` with `.venv/bin/jupyter lab --no-browser --port=5601 --ip=127.0.0.1 --IdentityProvider.token="$JUPYTER_TOKEN"`.
+- Required env vars for the local setup are `JUPYTER_URL`, `JUPYTER_TOKEN`, and `MCP_TOKEN`.
+- Committed package versions for MCP-backed notebook editing are `jupyterlab==4.5.6`, `notebook==7.5.5`, `jupyter-collaboration==4.3.0`, `jupyter-mcp-tools>=0.1.4`, and `datalayer-pycrdt==0.12.17`.
+- If notebook cell insert or edit calls fail on `/api/collaboration/session/...`, restart JupyterLab from the repo `.venv` and reconnect the notebook through MCP.
+- After the collaboration stack is healthy, Jupyter MCP can create notebooks, insert cells, and execute them without manually opening the notebook in the JupyterLab web UI.
+- To create a new notebook, add a valid `.ipynb` file under `notebooks/`, then call `use_notebook` with `mode=create` and a live kernel id (usually `python3`).
+- For notebook work, prefer `insert_execute_code_cell`, `read_notebook`, `read_cell`, and `overwrite_cell_source` over manual browser edits.
+
 ## Feature Docs
 
 Whenever a new feature is being developed, create a documentation file for it in `docs/features/`.

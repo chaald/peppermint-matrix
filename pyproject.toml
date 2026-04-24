@@ -5,8 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "datalayer-pycrdt==0.12.17",
     "jupyter>=1.1.1",
+    "jupyter-collaboration==4.3.0",
+    "jupyter-mcp-tools>=0.1.4",
+    "jupyterlab==4.5.6",
     "matplotlib>=3.10.8",
+    "notebook==7.5.5",
     "numpy>=2.4.0",
     "nvidia-cuda-runtime-cu12>=12.9.79; platform_system == 'Linux'",
     "nvidia-cudnn-cu12>=9.3; platform_system == 'Linux'",

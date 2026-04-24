@@ -17,6 +17,7 @@ A research toolkit for training and evaluating collaborative filtering recommend
 - [Hyperparameter Search](#hyperparameter-search)
 - [Evaluation Metrics](#evaluation-metrics)
 - [Experiment Tracking](#experiment-tracking)
+- [Jupyter MCP](#jupyter-mcp)
 
 ---
 
@@ -379,3 +380,39 @@ python wandb/sync.py \
 ### Surrogate model notebook
 
 The implemented surrogate model lives in `notebooks/parameter_analysis/surrogate_model.ipynb`. It trains a Random Forest on `wandb/summary.parquet`, evaluates the surrogate, and computes the ESM / coverage metrics used in the feature docs.
+
+---
+
+## Jupyter MCP
+
+This repo includes a local Jupyter MCP setup for OpenCode via `opencode.json`.
+
+### Environment
+
+Create a local `.env` from `.env.example` and fill in the tokens:
+
+```bash
+set -a; source .env; set +a
+```
+
+Required values:
+
+- `JUPYTER_URL=http://127.0.0.1:5601`
+- `JUPYTER_TOKEN=...`
+- `MCP_TOKEN=...`
+
+### Start JupyterLab
+
+Run JupyterLab from the repo `.venv`:
+
+```bash
+jupyter lab --no-browser --port=5601 --ip=127.0.0.1 --IdentityProvider.token="$JUPYTER_TOKEN"
+```
+
+### Activate In OpenCode
+
+Start OpenCode from the same shell after loading `.env` so it can read `opencode.json` and the env vars.
+
+If OpenCode was already running, fully quit and relaunch it. The MCP server is picked up on startup.
+
+If notebook cell insert or edit calls fail on `/api/collaboration/session/...`, restart JupyterLab and reconnect the notebook through MCP.
