@@ -269,18 +269,6 @@ python main.py --tracker=disabled --model=matrix_factorization --max_epoch=5
 
 `hyperparameter_search.py` launches parallel workers to run multiple training jobs across a sweep. Each worker runs independently.
 
-### Typical training command
-
-This is the command we usually use to train the matrix factorization model with embedding dropout:
-
-```bash
-python hyperparameter_search.py \
-    --method=exhaustive \
-    --config=configs/hyperparameter_search/mf:embedding_dropout.yaml \
-    --nworker=4 \
-    --nruns=16
-```
-
 What it does:
 
 - `--method=exhaustive` selects the least-explored categorical configuration from the search space
