@@ -258,7 +258,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="matrix_factorization", help="Model name to filter runs")
     parser.add_argument("--ensure_available_locally", action="store_true", help="Filter runs to only those available locally")
-    parser.add_argument("--sorting_criterion", type=str, nargs="+", default=["epoch/epoch"], help="Metric to sort runs by")
+    parser.add_argument("--sorting_criterion", type=str, nargs="+", default=["epoch/epoch"], help="Metric:weight pairs defining the composite score used to select each run's best epoch. Single metric: epoch/epoch. Composite: epoch/test_recall@10:0.5 epoch/test_ndcg@10:0.5 (default: epoch/epoch)")
     parser.add_argument("--process_count", type=int, default=8, help="Number of parallel processes to use")
     parser.add_argument("--threads_per_process", type=int, default=32, help="Number of threads per process")
     parser.add_argument("--output_path", type=str, default="wandb/summary.parquet", help="Path to save the output CSV file")
