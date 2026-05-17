@@ -4,6 +4,7 @@ import random
 import wandb
 import argparse
 import numpy as np
+import polars as pl
 import tensorflow as tf
 import keras
 import pprint
@@ -130,6 +131,47 @@ def main(**config):
     if config["tracker"] != "disabled":
         wandb.finish()
 
+    # Append run summary to wandb/summary.parquet for surrogate training
+    current_run = {
+        "run_id": run_id,
+        "run_name": run_name,
+        "sweep_id": sweep_id,
+        "model": config["model"],
+    }
+    for key, value in config.items():
+        if key == "metric":
+            continue
+        current_run[key] = str(value) if isinstance(value, list) else value
+
+    current_run["epoch/train_loss"] = model.train_loss_history
+    current_run["epoch/test_loss"] = model.test_loss_history
+
+    cutoffs = config["evaluation_cutoffs"]
+    for k in cutoffs:
+        current_run[f"epoch/test_hitrate@{k}"] = model.test_hitrate_history[k]
+        current_run[f"epoch/test_recall@{k}"] = model.test_recall_history[k]
+        current_run[f"epoch/test_precision@{k}"] = model.test_precision_history[k]
+        current_run[f"epoch/test_map@{k}"] = model.test_map_history[k]
+        current_run[f"epoch/test_ndcg@{k}"] = model.test_ndcg_history[k]
+        current_run[f"epoch/test_mrr@{k}"] = model.test_mrr_history[k]
+        current_run[f"epoch/train_hitrate@{k}"] = model.train_hitrate_history[k]
+        current_run[f"epoch/train_recall@{k}"] = model.train_recall_history[k]
+        current_run[f"epoch/train_precision@{k}"] = model.train_precision_history[k]
+        current_run[f"epoch/train_map@{k}"] = model.train_map_history[k]
+        current_run[f"epoch/train_ndcg@{k}"] = model.train_ndcg_history[k]
+        current_run[f"epoch/train_mrr@{k}"] = model.train_mrr_history[k]
+
+    if os.path.exists(config["parquet_path"]):
+        existing = pl.read_parquet(config["parquet_path"])
+        current_run = pl.DataFrame([current_run])
+        for col in current_run.columns:
+            if col in existing.schema:
+                current_run = current_run.with_columns(
+                    pl.col(col).cast(existing.schema[col])
+                )
+        combined = pl.concat([existing, current_run], how="diagonal")
+        combined.write_parquet(config["parquet_path"])
+
     print(f"{'='*10} Final Results {'='*24}")
     pprint.pprint(results)
     print(f"{'='*48}")
@@ -196,6 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--random_seed", type=int, default=None)
     parser.add_argument("--store_model", action="store_true", default=False)
     parser.add_argument("--tracker", type=str, default=None, help="Tracking backend. Use 'disabled' to skip wandb entirely.")
+    parser.add_argument("--parquet_path", type=str, default=None, help="Path to the summary parquet file for surrogate training. Overrides configs/default.yaml.")
 
     args = parser.parse_args()
     config = compile_config(args)

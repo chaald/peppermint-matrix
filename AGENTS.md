@@ -8,6 +8,7 @@
 
 ## Config And Runs
 - Config precedence is `configs/default.yaml` -> `--config` YAML -> CLI flags.
+- All default values live in `configs/default.yaml`. CLI args (`main.py` parser) are only for final overrides — they have `default=None` so they're skipped when not explicitly passed.
 - `--method=random|exhaustive` only matters when the YAML has a `parameters` block.
 - `exhaustive` search uses W&B history through `src.utils.config.fetch_experiment_runs(...)` to pick the least-explored categorical config.
 - Use `--tracker=disabled` for local runs that should not touch W&B.

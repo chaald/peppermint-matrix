@@ -256,8 +256,8 @@ Each call to `model_based_parse_params` appends one row to `hyperparameter_searc
 - [x] Validate `summaryMetrics` reliability — notebook in `notebooks/sandbox/summary_metrics_validation.ipynb`. **Verdict: use parquet list columns with on-the-fly max computation.**
 - [x] `wandb/sync.py` run once — parquet populated with full epoch history for ~3390 historical runs
 - [x] **Fix model history gap** — added missing `test_map_history`, `test_ndcg_history`, `test_mrr_history` appends
-- [ ] **Parquet append in `main.py`** — after `model.fit()`, collect epoch histories from model object, build parquet-compatible row, append to `wandb/summary.parquet`
-- [ ] **Verify parquet append** — run one training step with `--tracker=disabled --max_epoch=1 --store_model=false` and confirm the new row appears in `wandb/summary.parquet` without corrupting the file
+- [x] **Parquet append in `main.py`** — after `model.fit()`, collect epoch histories from model object, build parquet-compatible row, append to `wandb/summary.parquet`
+- [x] **Verify parquet append** — ran `hyperparameter_search.py --method=exhaustive --nworker=2 --nruns=2`, confirmed 4 new rows appended without corruption
 
 ### Implementation — Surrogate & UCB
 
