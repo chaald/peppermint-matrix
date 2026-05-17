@@ -15,10 +15,9 @@ from main import main, compile_config
 # ==================================
 # Start Agent Utility Function
 # ==================================
-def start_agent(
-        sweep_id: str = None, 
-        nruns: int = 1,
-    ):
+def start_agent(sweep_id: str | None = None, nruns: int = 1):
+    assert sweep_id is not None
+
     wandb.agent(
         sweep_id=sweep_id,
         function=main,
@@ -26,10 +25,7 @@ def start_agent(
         count=nruns
     )
 
-def local_agent(
-        args: argparse.Namespace,
-        nruns: int = 1,
-    ):
+def local_agent(args: argparse.Namespace, nruns: int = 1):
     for _ in range(nruns):
         run_config = compile_config(args)
         main(**run_config)
@@ -52,8 +48,11 @@ if __name__ == "__main__":
     # Validation
     if args.method == "wandb" and args.config is None and args.sweep_id is None:
         raise ValueError("Either --config or --sweep_id must be provided for wandb sweeps.")
-    elif args.method in ["random", "exhaustive"] and args.config is None:
-        raise ValueError(f"--config must be provided for {args.method} sweeps.")
+    elif args.method in ["random", "exhaustive"]:
+        if args.sweep_id is not None:
+            raise ValueError("--sweep_id is only valid with --method=wandb.")
+        if args.config is None:
+            raise ValueError(f"--config must be provided for {args.method} sweeps.")
     elif args.method not in ["wandb", "random", "exhaustive"]:
         raise NotImplementedError(f"Sweep method {args.method} not implemented yet.")
     

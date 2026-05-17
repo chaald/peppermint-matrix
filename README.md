@@ -283,9 +283,9 @@ In total, this command schedules up to 64 training runs, depending on worker ava
 
 | Argument | Default | Description |
 |---|---|---|
+| `--method` | `wandb` | Search method: `wandb`, `random`, `exhaustive` |
 | `--nworker` | `1` | Number of parallel worker processes |
 | `--nruns` | `1` | Number of runs per worker |
-| `--method` | `wandb` | Search method: `wandb`, `random`, `exhaustive` |
 | `--sweep_id` | `None` | Resume an existing W&B sweep by ID |
 | `--config` | `None` | Path to YAML sweep config |
 
