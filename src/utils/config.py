@@ -81,6 +81,41 @@ def fetch_experiment_runs(
     filters: Dict[str, Union[int, float, str]],
     include_summary_metrics: bool = False,
 ) -> pl.DataFrame:
+    """Fetch runs from W&B matching *filters* and return their configs as a DataFrame.
+
+    Filter keys prefixed with ``config.`` target hyperparameters (e.g.
+    ``{"config.model": "matrix_factorization"}``). Keys without the prefix
+    target top-level W&B fields (e.g. ``{"state": "finished"}``).
+
+    The function paginates automatically (256 runs per page) and only fetches
+    configs — no per-step metric history, so it's fast. Pass
+    ``include_summary_metrics=True`` to also pull final metric values
+    (loss, recall, etc.) for each run.
+
+    Parameters
+    ----------
+    filters:
+        Dictionary of filter criteria passed directly to the W&B GraphQL API.
+    include_summary_metrics:
+        If ``True``, include each run's summary metrics (final values) as
+        columns in the returned DataFrame.
+
+    Returns
+    -------
+    pl.DataFrame
+        One row per matching run with columns for run_id, run_name, node_id,
+        every config parameter, and optionally summary metrics.
+
+    Example
+    -------
+    >>> runs = fetch_experiment_runs({
+    ...     "config.model": "matrix_factorization",
+    ...     "config.embedding_dimension": 64,
+    ...     "state": "finished",
+    ... })
+    >>> runs.shape
+    (42, 12)
+    """
     api = wandb.Api() # Initialize Weights & Biases API, used for fetching run data
 
     summary_metrics_field = "summaryMetrics" if include_summary_metrics else ""
