@@ -20,14 +20,11 @@
 - `uv run pytest tests/test_main.py` or `uv run pytest tests/test_main.py -k <pattern>` for focused checks
 
 ## Workflow
+- Load `.env` before running any command: `set -a; source .env; set +a` (sets `LD_LIBRARY_PATH` for GPU/cuDNN + Jupyter vars).
 - Check prior runs with `src.utils.config.fetch_experiment_runs(filters)` before starting a new experiment.
 - `hyperparameter_search.py` staggers worker startup by 60 seconds for `exhaustive`; keep that unless you verify the race is gone.
 - Saved models go under `models/{model}/{sweep_id}/{run_id}/`; `models/` and `wandb/` are ignored by git.
 - When working on a new feature, consult `docs/features/README.md`, create `docs/features/<feature-name>.md`, and update the Feature Index.
-
-## Jupyter MCP
-- The repo includes a local Jupyter MCP setup for OpenCode via `opencode.json`.
-- Load `.env` before starting OpenCode or JupyterLab: `set -a; source .env; set +a`.
 - Start JupyterLab from the repo `.venv` with `.venv/bin/jupyter lab --no-browser --port=5601 --ip=127.0.0.1 --IdentityProvider.token="$JUPYTER_TOKEN"`.
 - Required env vars for the local setup are `JUPYTER_URL`, `JUPYTER_TOKEN`, and `MCP_TOKEN`.
 - Committed package versions for MCP-backed notebook editing are `jupyterlab==4.5.6`, `notebook==7.5.5`, `jupyter-collaboration==4.3.0`, `jupyter-mcp-tools>=0.1.4`, and `datalayer-pycrdt==0.12.17`.
