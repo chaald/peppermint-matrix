@@ -81,16 +81,61 @@ def fetch_experiment_runs(
     filters: Dict[str, Union[int, float, str]],
     include_summary_metrics: bool = False,
 ) -> pl.DataFrame:
-    """Fetch runs from W&B matching *filters* and return their configs as a DataFrame.
+    """Query the Weights & Biases API for experiment runs that match the
+    provided *filters*, parse each run's configuration, and return the
+    results as a ``polars.DataFrame`` — one row per run.
 
-    Filter keys prefixed with ``config.`` target hyperparameters (e.g.
-    ``{"config.model": "matrix_factorization"}``). Keys without the prefix
-    target top-level W&B fields (e.g. ``{"state": "finished"}``).
+    How filters work
+    ----------------
+    The *filters* dictionary is passed directly to the W&B GraphQL API.
+    Two kinds of keys are supported:
 
-    The function paginates automatically (256 runs per page) and only fetches
-    configs — no per-step metric history, so it's fast. Pass
-    ``include_summary_metrics=True`` to also pull final metric values
-    (loss, recall, etc.) for each run.
+    - **Config (hyperparameter) fields** — prefix the key with ``config.``.
+      For example, ``{"config.model": "matrix_factorization"}`` only returns
+      runs whose ``model`` config key equals ``"matrix_factorization"``.
+    - **Top-level W&B fields** — no prefix. For example, ``{"state": "finished"}``
+      filters runs that completed successfully. Other useful top-level fields
+      include ``sweep`` (sweep ID) and ``tags``.
+
+    Multiple filters are combined with AND logic. Numerical fields support
+    comparison operators via W&B's query syntax (e.g.
+    ``{"config.learning_rate": {"$gte": 0.001}}``).
+
+    Pagination
+    ----------
+    The W&B GraphQL API returns a maximum of 256 runs per page. This function
+    handles pagination automatically — it follows ``hasNextPage`` / ``endCursor``
+    tokens in a loop until all matching runs have been collected. You don't
+    need to manage cursors yourself.
+
+    What is fetched
+    ---------------
+    By default only **config** values are retrieved (run ID, display name,
+    and every key in the run's ``config`` dictionary). Config values that are
+    lists or dicts are JSON-serialised to strings so they fit in a flat
+    DataFrame column.
+
+    Per-step metric **history** is **not** fetched — this keeps the query
+    fast even for thousands of runs. If you need the best-epoch logic (as
+    ``wandb/sync.py`` does), use ``sync.py`` to produce ``summary.parquet``
+    instead.
+
+    Summary metrics (optional)
+    --------------------------
+    Set ``include_summary_metrics=True`` to also pull each run's **final**
+    metric values (the last value logged for each metric key, e.g. loss,
+    recall, NDCG). These are stored in W&B's ``summaryMetrics`` field.
+    Internal keys starting with ``_wandb`` are stripped. The ``_runtime``,
+    ``_step``, and ``_timestamp`` keys are renamed to ``runtime``, ``step``,
+    and ``timestamp`` respectively for convenience.
+
+    Use cases
+    ---------
+    - Checking whether a given hyperparameter combination has already been
+      tried before launching a new experiment.
+    - Counting how many runs exist for a given model or sweep.
+    - Building a quick overview table of completed runs and their final
+      metrics for analysis or reporting.
 
     Parameters
     ----------
