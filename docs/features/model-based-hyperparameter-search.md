@@ -1,5 +1,5 @@
 # Model-Based Hyperparameter Search
-**Date:** 2026-03-15
+**Date:** 2026-03-15 (Updated 2026-05-16)
 
 ## Overview
 
@@ -43,73 +43,105 @@ The corresponding resolver in `src/utils/config.py` (`model_based_parse_params`)
 
 ### Workflow per Worker Call
 
-1. Fetch all **finished** runs for the fixed parameters via `fetch_experiment_runs` (GraphQL with `summaryMetrics` + `state: "finished"` filter)
-2. Extract the target metric value from each run's `summaryMetrics` JSON; aggregate duplicate configs with `.mean()`
-3. If < 20 runs have valid target metric values → fall back to random sampling with a warning
-4. Fit the Random Forest surrogate pipeline (`RegularizationLogTransformer` → `RandomForestRegressor`) on `(config → target_metric)`
-5. Enumerate all cells in the categorical parameter space
-6. Compute UCB score for **every cell** (explored and unexplored) using per-tree predictions for $\hat{\mu}$ and $\hat{\sigma}$
-7. Compute and log ESM + Coverage@75 to stdout
-8. Append the selected config's decision metadata to `hyperparameter_search.log.csv`
-9. Return the config with the highest UCB score across the full grid (random tie-breaking)
+Each call to `model_based_parse_params` fits a **fresh surrogate** on the latest parquet data before picking a config. This is critical because workers run concurrently — by the time a worker picks its next config, other workers may have finished runs and appended them to the parquet. The surrogate must reflect that new signal to make an informed decision.
 
-Steps 1–9 replace the current W&B round-trip + argmin logic in `exhaustive_parse_parameters`. The ~40 second startup cost is similar.
+1. **Read `wandb/summary.parquet`** directly (local file, instant) — no `fetch_experiment_runs` needed for metric data. The parquet contains per-epoch history as list columns plus config fields.
+2. **Compute target metric** from the list columns on the fly:
+   - Single target: `target_run = max(run["epoch/test_recall@20"])` — true max across all epochs
+   - Weighted composite: `composite = [sum(w * m[i] for m, w in target) for i in range(n_epochs)]; target = max(composite)`
+3. **Aggregate duplicate configs** (same categorical params) with `.mean()` of the target
+4. If < 20 runs have valid target values → fall back to random sampling with a warning
+5. Fit the Random Forest surrogate pipeline on `(config → target)`
+6. Enumerate all cells in the categorical parameter space
+7. Compute UCB score for **every cell** using per-tree predictions for $\hat{\mu}$ and $\hat{\sigma}$
+8. Compute and log ESM + Coverage@75 to stdout
+9. Append the selected config's decision metadata to `hyperparameter_search.log.csv`
+10. Return the config with the highest UCB score (random tie-breaking)
 
 Scoring the full grid (rather than filtering to unexplored cells first) means the surrogate can re-run a config if it genuinely has the highest UCB — e.g. a config with observed high variance, or one where the surrogate's uncertainty is elevated due to few repeated runs.
 
-### New CLI Arguments
+**Note on param types:** All searchable params use `categorical` in practice (even `embedding_dimension` is enumerated as discrete values). Non-search utility params like `random_seed` may use `int_uniform` but they're sampled randomly and don't affect the surrogate — the grid is purely categorical.
+
+### Data Source — `wandb/summary.parquet` with On-the-Fly Target Computation
+
+**No live W&B API calls for metric data.** The parquet is the single source of truth for surrogate training. This avoids both:
+- **Last-epoch bias** (93.6% of runs degrade at last epoch — validated in `notebooks/sandbox/summary_metrics_validation.ipynb`)
+- **Sync.py latency** (regenerating parquet from W&B history is slow)
+
+The parquet stores every epoch's metrics as **list columns** (e.g., `epoch/test_recall@20 = [0.01, 0.02, 0.045, 0.044, ...]`). The surrogate reads these lists and computes the true per-run max for whatever target is specified — no `sync.py` re-run needed when the target changes.
+
+**Target is specified as the raw metric key** as it appears in the parquet, e.g., `epoch/test_recall@20`. Weighted composites follow the same format as `sync.py`'s `--sorting_criterion`:
+
+```
+--model_based_target "epoch/test_recall@20:0.7 epoch/test_ndcg@20:0.3"
+```
+
+### Keeping the Parquet Up to Date — Append from `main.py`
+
+`hyperparameter_search.py` runs multiple workers concurrently. Each worker's decision should reflect the latest state — otherwise a worker might pick a config that another worker just finished evaluating. This is the same constraint that motivated the original live-API approach, but we solve it differently: every run appends its result to the local parquet on completion, so subsequent workers on the same machine always see the freshest data.
+
+`wandb/sync.py` was run once (historically) to populate the parquet with ~3390 runs. Going forward, every run appends its own result on completion:
+
+The surrogate only needs config fields (to identify the categorical cell) and `epoch/*` list columns (to compute the target max). Everything else (`_step`, `score`, `best:*`, `gpu_type`, etc.) is ignored by the surrogate. The append writes just what's needed:
+
+```python
+# In main(), after model.fit() and before returning:
+import polars as pl
+
+row = {
+    "run_id": run_id,
+    "run_name": run_name,
+    "sweep_id": sweep_id,
+    "model": config["model"],
+    **{k: v for k, v in config.items() if k in CONFIG_FIELDS},
+    "train_loss": model.train_loss_history,
+    "test_loss": model.test_loss_history,
+}
+for k in config["evaluation_cutoffs"]:
+    row[f"epoch/test_hitrate@{k}"] = model.test_hitrate_history[k]
+    row[f"epoch/test_recall@{k}"] = model.test_recall_history[k]
+    row[f"epoch/test_precision@{k}"] = model.test_precision_history[k]
+    row[f"epoch/test_map@{k}"] = model.test_map_history[k]
+    row[f"epoch/test_ndcg@{k}"] = model.test_ndcg_history[k]
+    row[f"epoch/test_mrr@{k}"] = model.test_mrr_history[k]
+    row[f"epoch/train_hitrate@{k}"] = model.train_hitrate_history[k]
+    row[f"epoch/train_recall@{k}"] = model.train_recall_history[k]
+    row[f"epoch/train_precision@{k}"] = model.train_precision_history[k]
+    row[f"epoch/train_map@{k}"] = model.train_map_history[k]
+    row[f"epoch/train_ndcg@{k}"] = model.train_ndcg_history[k]
+    row[f"epoch/train_mrr@{k}"] = model.train_mrr_history[k]
+
+existing = pl.read_parquet("wandb/summary.parquet")
+combined = pl.concat([existing, pl.DataFrame([row])], how="diagonal")
+combined.write_parquet("wandb/summary.parquet")
+```
+
+`how="diagonal"` aligns columns by name — any column not in `row` (e.g. `_step`, `score`, `best:*`, `gpu_type`) becomes null. These are safe to leave null because (a) the surrogate doesn't read them, and (b) `sync.py` replaces the full parquet with complete data the next time it runs.
+
+### Test MAP/NDCG/MRR Histories on Model Object
+
+The model's `evaluate_kernel` already computes MAP, NDCG, and MRR. The history lists were initialized but never appended — now fixed with the 3 missing appends in `matrix_factorization.py:evaluate()`.
+
+### Distributed Worker Staleness
+
+Workers on different machines won't see each other's newly appended rows in the local parquet. Accepted as minor staleness: new runs from other workers will appear in the parquet's next append on the local machine. The surrogate may be slightly behind the global state, but this decays to zero as all workers converge.
+
+## New CLI Arguments
 
 | Argument | Default | Description |
 |---|---|---|
 | `--method=model_based` | — | Enable model-based search |
 | `--model_based_beta` | `1.0` | Exploration weight $\beta$ in the UCB formula |
-| `--model_based_target` | `test_recall@10` | Target metric column to optimise (must exist in completed run data) |
+| `--model_based_target` | `epoch/test_recall@20` | Target metric key in the parquet. Supports weighted composite: `"epoch/test_recall@20:0.7 epoch/test_ndcg@20:0.3"` |
 | `--model_based_estimator_count` | `1024` | Number of trees in the Random Forest surrogate |
 
-### Handling Edge Cases
+## Handling Edge Cases
 
 - **No completed runs yet:** fall back to random sampling (surrogate cannot be fit)
 - **Too few runs to fit reliably (e.g. < 20):** fall back to random sampling with a warning
 - **Tie-breaking:** if multiple cells have equal UCB scores, pick randomly among them
 
 ## Implementation Details
-
-### Data Source — Live W&B API with Metric Fetching
-
-Each call to `model_based_parse_params` queries the W&B API **directly** (not the local `wandb/summary.parquet`). This ensures the surrogate sees newly completed runs in real time, which is critical because `hyperparameter_search.py` runs multiple workers concurrently and each worker's decision should reflect the latest state.
-
-**Approach:** Extend the existing `fetch_experiment_runs` GraphQL query to also request the `summaryMetrics` field on each run node. This field is a JSON string containing the run's summary metrics (including per-epoch metrics logged by `WandbMetricsLogger`). The target metric value is extracted from this JSON per run.
-
-The GraphQL query also adds a `state: "finished"` filter so only completed runs are returned. This avoids training the surrogate on partial/crashed runs.
-
-```graphql
-query Runs(...) {
-    project(name: $project, entityName: $entity) {
-        runs(first: 256, after: $cursor, filters: $filters) {
-            edges {
-                node {
-                    id
-                    name
-                    config
-                    summaryMetrics   # ← new field
-                }
-            }
-            ...
-        }
-    }
-}
-```
-
-**Performance:** This is the same single paginated GraphQL query used by `fetch_experiment_runs` today, with one additional field per run. No extra API calls. The ~40 second latency matches the existing `exhaustive_parse_parameters` cost.
-
-**Best-epoch vs. last-epoch:** `summaryMetrics` contains W&B's summary values (the last logged value per metric). Validation in `notebooks/sandbox/summary_metrics_validation.ipynb` confirmed this is **not reliable** as a surrogate training signal:
-- 93.6% of runs are degraded at last epoch vs. their best epoch
-- Mean relative gap is 16.68% of the best-epoch value
-- A top-left cluster of runs peaked at recall@20 ≈ 0.03–0.05 but collapsed to near-zero by the final epoch — these would poison the surrogate with near-zero targets for genuinely good configurations
-
-**Decision: use `best:epoch/test_recall@20` from `wandb/summary.parquet` as the surrogate training target.** This requires that `sync.py` has been run with `--sorting_criterion epoch/test_recall@20` (or a composite that includes it) so the `best:` epoch is chosen to maximise recall@20.
-
-**Target metric naming:** The `--model_based_target` CLI argument specifies the metric key as it appears in `wandb/summary.parquet` with the `best:epoch/` prefix (e.g. `best:epoch/test_recall@20`). The `best:` prefix is a `sync.py` convention.
 
 ### Interface — Extending `load_config`
 
@@ -139,22 +171,8 @@ Key components:
 - **`RegularizationLogTransformer`** — `BaseEstimator` + `TransformerMixin` that log₁₀-transforms `l1_regularization` and `l2_regularization` columns (zero → sentinel `-15.0`, else `round(log10(x), 1)`)
 - **`Pipeline`** — `[("log_reg", RegularizationLogTransformer(...)), ("rf", RandomForestRegressor(...))]`
 - **RF hyperparameters:** `n_estimators` from `--model_based_estimator_count` (default 1024), `max_features="sqrt"`, `max_samples=0.1`, `min_samples_leaf=3`, `n_jobs=-1`, `random_state=42`
-- **Feature names:** derived from the categorical parameters in the config (same as `exhaustive_parse_parameters` does for its `free_categorical_parameters`)
-- **Duplicate-run aggregation:** multiple runs with the same categorical config are `.mean()`-aggregated before fitting. This is consistent with the notebook approach
-
-### State Filtering in `fetch_experiment_runs`
-
-`fetch_experiment_runs` passes all filter keys through to the GraphQL query as-is — the caller is responsible for the correct key format. Hyperparameter config fields use the `config.` prefix; top-level W&B fields like `state` do not:
-
-```python
-# As used by model_based_parse_params
-fetch_experiment_runs(
-    {f"config.{k}": v for k, v in fixed_parameters.items()} | {"state": "finished"},
-    include_summary_metrics=True,
-)
-```
-
-`exhaustive_parse_parameters` already prefixes its `fixed_parameters` keys with `config.` at the call site, so its behaviour is unchanged.
+- **Feature names:** derived from the categorical parameters in the config
+- **Duplicate-run aggregation:** multiple runs with the same categorical config are `.mean()`-aggregated before fitting
 
 ### Decision Log — Repo Root
 
@@ -170,19 +188,26 @@ At the start of each `model_based_parse_params` call, after fitting the surrogat
 
 This feature **depends on** the surrogate model feature ([surrogate-model.md](surrogate-model.md)):
 - Reuses the same Random Forest fitting logic (ported from `notebooks/parameter_analysis/surrogate_model.ipynb`)
-- Reuses `fetch_experiment_runs` as the data source (extended with `summaryMetrics` and state filtering)
 - The ESM metric from the surrogate feature is logged at the start of each model-based worker call to track exploration progress over time
 
 ## Usage
 
 ```bash
-# Model-based search with default beta
+# Model-based search with default beta, target test_recall@20
 python hyperparameter_search.py \
     --method=model_based \
     --config=configs/hyperparameter_search/mf:elasticnet.yaml \
     --nworker=4 \
     --nruns=8 \
-    --model_based_target=test_recall@10
+    --model_based_target="epoch/test_recall@20"
+
+# Weighted composite target
+python hyperparameter_search.py \
+    --method=model_based \
+    --config=configs/hyperparameter_search/mf:elasticnet.yaml \
+    --nworker=4 \
+    --nruns=8 \
+    --model_based_target="epoch/test_recall@20:0.7 epoch/test_ndcg@20:0.3"
 
 # More exploratory (higher beta)
 python hyperparameter_search.py \
@@ -190,8 +215,7 @@ python hyperparameter_search.py \
     --config=configs/hyperparameter_search/mf:elasticnet.yaml \
     --nworker=4 \
     --nruns=8 \
-    --model_based_beta=2.0 \
-    --model_based_target=test_recall@10
+    --model_based_beta=2.0
 ```
 
 ## Decision Log — `hyperparameter_search.log.csv`
@@ -220,23 +244,33 @@ Each call to `model_based_parse_params` appends one row to `hyperparameter_searc
 
 - **$\beta$ tuning:** Should $\beta$ decay over time (more exploitation as space fills up)? Or remain fixed?
 - **Multi-worker race conditions:** Multiple workers will independently pick the same top UCB cell if run in parallel. Need a locking mechanism or a "batch UCB" strategy (pick top-$k$ diverse cells for $k$ workers). The current 60-second stagger partially mitigates this but doesn't solve it.
-- **Target metric:** Should UCB optimise a single metric or a weighted composite (same format as `--sorting_criterion` in `sync.py`)?
 
 ## Task Status
 
 > **Workflow:** Tasks are implemented one at a time in order. Each task is submitted for review before the next one begins. Do not proceed to the next task until the current one is reviewed and approved.
 
+### Foundation — Data Pipeline
+
 - [x] Planned
 - [x] Implementation details documented
-- [x] Extend `fetch_experiment_runs` — add `summaryMetrics` to GraphQL query + optional `state` filter
-- [x] Validate `summaryMetrics` reliability — notebook in `notebooks/sandbox/summary_metrics_validation.ipynb`. **Verdict: use parquet.** 93.6% of runs are degraded at last epoch; mean relative gap is 16.68%; scatter plot shows a top-left cluster of runs that peaked at recall@20 ≈ 0.03–0.05 but collapsed to near-zero by the final epoch. Training the surrogate on `summaryMetrics` targets would corrupt the training signal for those runs. **Data source: `best:epoch/test_recall@20` from `wandb/summary.parquet`.**
+- [x] Validate `summaryMetrics` reliability — notebook in `notebooks/sandbox/summary_metrics_validation.ipynb`. **Verdict: use parquet list columns with on-the-fly max computation.**
+- [x] `wandb/sync.py` run once — parquet populated with full epoch history for ~3390 historical runs
+- [x] **Fix model history gap** — added missing `test_map_history`, `test_ndcg_history`, `test_mrr_history` appends
+- [ ] **Parquet append in `main.py`** — after `model.fit()`, collect epoch histories from model object, build parquet-compatible row, append to `wandb/summary.parquet`
+- [ ] **Verify parquet append** — run one training step with `--tracker=disabled --max_epoch=1 --store_model=false` and confirm the new row appears in `wandb/summary.parquet` without corrupting the file
+
+### Implementation — Surrogate & UCB
+
 - [ ] CLI arg wiring — add `--model_based_beta`, `--model_based_target`, `--model_based_estimator_count` to `hyperparameter_search.py`; extend validation; pass through `compile_config` → `load_config`
-- [ ] `model_based_parse_params` skeleton — parameter parsing (fixed/categorical/random split), extend `load_config` with `**kwargs` dispatch
+- [ ] `model_based_parse_params` skeleton — parameter parsing (fixed/categorical/random split), extend `load_config` with `**kwargs` dispatch, read parquet + compute target from list columns
 - [ ] Port surrogate pipeline — `RegularizationLogTransformer` + `RandomForestRegressor` Pipeline from notebook into `src/utils/config.py`
 - [ ] Full-grid UCB scoring — enumerate categorical space, compute per-tree $\hat{\mu}$/$\hat{\sigma}$, argmax with random tie-breaking
 - [ ] Fallback: cold start (no runs → random)
 - [ ] Fallback: sparse data (< 20 runs → random with warning)
 - [ ] ESM + Coverage@75 logging to stdout
+
+### Logging & Polish
+
 - [ ] Decision log append (`hyperparameter_search.log.csv` at repo root)
 - [ ] Multi-worker deduplication strategy
 - [ ] Integration tests

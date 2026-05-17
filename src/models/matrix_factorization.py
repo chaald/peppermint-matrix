@@ -387,6 +387,9 @@ class MatrixFactorization(keras.Model):
                 self.test_hitrate_history[k].append(float(self.test_hitrate_tracker[k].result()))
                 self.test_recall_history[k].append(float(self.test_recall_tracker[k].result()))
                 self.test_precision_history[k].append(float(self.test_precision_tracker[k].result()))
+                self.test_map_history[k].append(float(self.test_map_tracker[k].result()))
+                self.test_ndcg_history[k].append(float(self.test_ndcg_tracker[k].result()))
+                self.test_mrr_history[k].append(float(self.test_mrr_tracker[k].result()))
 
         return metrics_aggregate
 
