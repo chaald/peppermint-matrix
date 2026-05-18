@@ -196,13 +196,21 @@ def compile_config(args):
     # Load Default Config, priority 3
     config = load_config("configs/default.yaml")
 
+    # Extract model-based kwargs if applicable
+    model_based_kwargs = {}
+    if args.method == "model_based":
+        for key in ("model_based_beta", "model_based_target", "model_based_estimator_count"):
+            value = getattr(args, key)
+            if value is not None:
+                model_based_kwargs[key.removeprefix("model_based_")] = value
+
     # Load Config File, priority 2
-    loaded_config = load_config(args.config, method=args.method) if args.config is not None else {}
+    loaded_config = load_config(args.config, method=args.method, **model_based_kwargs) if args.config is not None else {}
     config.update(loaded_config)
 
     # Override with CLI Arguments, priority 1
     for key, value in vars(args).items():
-        if key in ["nworker", "nruns", "sweep_id", "method"]:
+        if key in ["nworker", "nruns", "sweep_id", "method", "model_based_beta", "model_based_target", "model_based_estimator_count"]:
             continue
 
         if (value is not None and not isinstance(value, bool)) or (isinstance(value, bool) and value == True):
@@ -214,7 +222,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Config file
     parser.add_argument("--config", type=str, default=None, help="Path to the YAML configuration file.")
-    parser.add_argument("--method", type=str, default="random", help="How to collapse the config into single run config, Literal[random, exhaustive].")
+    parser.add_argument("--method", type=str, default="random", help="How to collapse the config into single run config, Literal[random, exhaustive, model_based].")
     # Model configuration
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--embedding_dimension", type=int, default=None)
@@ -239,6 +247,9 @@ if __name__ == "__main__":
     parser.add_argument("--store_model", action="store_true", default=False)
     parser.add_argument("--tracker", type=str, default=None, help="Tracking backend. Use 'disabled' to skip wandb entirely.")
     parser.add_argument("--parquet_path", type=str, default=None, help="Path to the summary parquet file for surrogate training. Overrides configs/default.yaml.")
+    parser.add_argument("--model_based_beta", type=float, default=None, help="Exploration weight for UCB formula. Overrides configs/default.yaml.")
+    parser.add_argument("--model_based_target", type=str, default=None, help="Target metric key in parquet. Overrides configs/default.yaml.")
+    parser.add_argument("--model_based_estimator_count", type=int, default=None, help="Number of trees in Random Forest surrogate. Overrides configs/default.yaml.")
 
     args = parser.parse_args()
     config = compile_config(args)

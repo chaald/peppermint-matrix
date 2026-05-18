@@ -39,21 +39,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--nworker", type=int, default=1, help="Number of agents to run in parallel")
     parser.add_argument("--nruns", type=int, default=1, help="Number of runs for each workers")
-    parser.add_argument("--method", type=str, default="wandb", help="Sweep method: wandb, random, exhaustive")
+    parser.add_argument("--method", type=str, default="wandb", help="Sweep method: wandb, random, exhaustive, model_based")
     parser.add_argument("--sweep_id", type=str, default=None, help="W&B sweep ID. If not provided, create a new sweep.")
     parser.add_argument("--config", type=str, default=None, help="Config path in yaml format.")
+    parser.add_argument("--model_based_beta", type=float, default=1.0, help="Exploration weight for UCB formula. Only for --method=model_based.")
+    parser.add_argument("--model_based_target", type=str, default="epoch/test_recall@20", help="Target metric key in parquet. Supports weighted composite. Only for --method=model_based.")
+    parser.add_argument("--model_based_estimator_count", type=int, default=1024, help="Number of trees in Random Forest surrogate. Only for --method=model_based.")
 
     args = parser.parse_args()
 
     # Validation
     if args.method == "wandb" and args.config is None and args.sweep_id is None:
         raise ValueError("Either --config or --sweep_id must be provided for wandb sweeps.")
-    elif args.method in ["random", "exhaustive"]:
+    elif args.method in ["random", "exhaustive", "model_based"]:
         if args.sweep_id is not None:
             raise ValueError("--sweep_id is only valid with --method=wandb.")
         if args.config is None:
             raise ValueError(f"--config must be provided for {args.method} sweeps.")
-    elif args.method not in ["wandb", "random", "exhaustive"]:
+    elif args.method not in ["wandb", "random", "exhaustive", "model_based"]:
         raise NotImplementedError(f"Sweep method {args.method} not implemented yet.")
     
     if args.method == "wandb":

@@ -307,14 +307,18 @@ def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
         **parse_parameters(free_random_parameters)
     }
 
-def load_config(config_path: str, method: Literal["random", "exhaustive"] = "random") -> Dict:
+def model_based_parse_params(parameters_config: Dict, beta: float = 1.0, target: str = "epoch/test_recall@20", estimator_count: int = 1024) -> Dict:
+    """Stub — will be implemented in a later task."""
+
+
+def load_config(config_path: str, method: Literal["random", "exhaustive", "model_based"] = "random", **kwargs) -> Dict:
     """
     Load configuration from a YAML file.
     Will also sample hyperparameters if the config file is for hyperparameter search.
 
     Args:
         config_path (str): Path to the YAML configuration file.
-        method (Literal["random", "exhaustive"]): Method for hyperparameter search. Options are "random" or "exhaustive".
+        method (Literal["random", "exhaustive", "model_based"]): Method for hyperparameter search.
     Returns:
         dict: Configuration parameters as a dictionary.
     """
@@ -326,6 +330,8 @@ def load_config(config_path: str, method: Literal["random", "exhaustive"] = "ran
             current_run_config.update(parse_parameters(config["parameters"]))
         elif method == "exhaustive":
             current_run_config.update(exhaustive_parse_parameters(config["parameters"]))
+        elif method == "model_based":
+            current_run_config.update(model_based_parse_params(config["parameters"], **kwargs))
         else:
             raise ValueError(f"Unsupported hyperparameter search method: {method}")
     else:
