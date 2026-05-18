@@ -36,14 +36,14 @@ The next configuration to run is $\arg\max_x \text{UCB}(x)$ over all unexplored 
 
 A new `--method=model_based` option in `hyperparameter_search.py`, alongside the existing `random`, `exhaustive`, and `wandb` methods.
 
-The corresponding resolver in `src/utils/config.py` (`model_based_parse_params`) follows the same interface as `exhaustive_parse_parameters`:
+The corresponding resolver in `src/utils/config.py` (`model_based_parse_parameters`) follows the same interface as `exhaustive_parse_parameters`:
 - Takes a `parameters_config` dict
 - Returns a single resolved config dict
 - Can be called once per worker, just like the existing methods
 
 ### Workflow per Worker Call
 
-Each call to `model_based_parse_params` fits a **fresh surrogate** on the latest parquet data before picking a config. This is critical because workers run concurrently — by the time a worker picks its next config, other workers may have finished runs and appended them to the parquet. The surrogate must reflect that new signal to make an informed decision.
+Each call to `model_based_parse_parameters` fits a **fresh surrogate** on the latest parquet data before picking a config. This is critical because workers run concurrently — by the time a worker picks its next config, other workers may have finished runs and appended them to the parquet. The surrogate must reflect that new signal to make an informed decision.
 
 1. **Read `wandb/summary.parquet`** directly (local file, instant) — no `fetch_experiment_runs` needed for metric data. The parquet contains per-epoch history as list columns plus config fields.
 2. **Compute target metric** from the list columns on the fly:
@@ -151,36 +151,36 @@ Extend `load_config` in `src/utils/config.py` to accept `**kwargs` that are forw
 def load_config(config_path: str, method: Literal["random", "exhaustive", "model_based"] = "random", **kwargs) -> Dict:
     ...
     if method == "model_based":
-        current_run_config.update(model_based_parse_params(config["parameters"], **kwargs))
+        current_run_config.update(model_based_parse_parameters(config["parameters"], **kwargs))
     ...
 ```
 
-`model_based_parse_params` follows the same interface as `exhaustive_parse_parameters`:
+`model_based_parse_parameters` follows the same interface as `exhaustive_parse_parameters`:
 - **Input:** `parameters_config` dict (the `parameters:` block from the YAML config) + keyword arguments (`beta`, `target_metric`, `estimator_count`)
 - **Output:** a single resolved config dict (one value per parameter)
 
-The caller chain: `compile_config(args)` → `load_config(config_path, method, **model_based_kwargs)` → `model_based_parse_params(parameters_config, ...)`.
+The caller chain: `compile_config(args)` → `load_config(config_path, method, **model_based_kwargs)` → `model_based_parse_parameters(parameters_config, ...)`.
 
 `compile_config` in `main.py` extracts the model-based CLI args and passes them as kwargs to `load_config`.
 
 ### Surrogate Pipeline — Ported from Notebook
 
-The `RegularizationLogTransformer` and sklearn `Pipeline` are ported from `notebooks/parameter_analysis/surrogate_model.ipynb` into `src/utils/config.py` (co-located with `model_based_parse_params`).
+The `Log10Transformer` and sklearn `Pipeline` are ported from `notebooks/parameter_analysis/surrogate_model.ipynb` into `src/utils/config.py` (co-located with `model_based_parse_parameters`).
 
 Key components:
-- **`RegularizationLogTransformer`** — `BaseEstimator` + `TransformerMixin` that log₁₀-transforms `l1_regularization` and `l2_regularization` columns (zero → sentinel `-15.0`, else `round(log10(x), 1)`)
-- **`Pipeline`** — `[("log_reg", RegularizationLogTransformer(...)), ("rf", RandomForestRegressor(...))]`
+- **`Log10Transformer`** — `BaseEstimator` + `TransformerMixin` that log₁₀-transforms `l1_regularization` and `l2_regularization` columns (zero → sentinel `-15.0`, else `round(log10(x), 1)`)
+- **`Pipeline`** — `[("log_reg", Log10Transformer(...)), ("rf", RandomForestRegressor(...))]`
 - **RF hyperparameters:** `n_estimators` from `--model_based_estimator_count` (default 1024), `max_features="sqrt"`, `max_samples=0.1`, `min_samples_leaf=3`, `n_jobs=-1`, `random_state=42`
 - **Feature names:** derived from the categorical parameters in the config
 - **Duplicate-run aggregation:** multiple runs with the same categorical config are `.mean()`-aggregated before fitting
 
 ### Decision Log — Repo Root
 
-`hyperparameter_search.log.csv` is written to the repository root directory. The file is append-only with one row per `model_based_parse_params` call. Concurrent workers append independently (file-level append atomicity is sufficient on Linux for single-line CSV writes).
+`hyperparameter_search.log.csv` is written to the repository root directory. The file is append-only with one row per `model_based_parse_parameters` call. Concurrent workers append independently (file-level append atomicity is sufficient on Linux for single-line CSV writes).
 
 ### ESM Logging
 
-At the start of each `model_based_parse_params` call, after fitting the surrogate and computing the full-grid UCB scores, the ESM and Coverage@75 metrics are computed and:
+At the start of each `model_based_parse_parameters` call, after fitting the surrogate and computing the full-grid UCB scores, the ESM and Coverage@75 metrics are computed and:
 - **Printed to stdout** — provides a running trace of exploration saturation as workers execute
 - **Written to `hyperparameter_search.log.csv`** — the `esm` and `coverage_75` columns on each row capture the global surrogate state at the moment the config was selected, enabling post-hoc analysis of saturation progression over time
 
@@ -220,7 +220,7 @@ python hyperparameter_search.py \
 
 ## Decision Log — `hyperparameter_search.log.csv`
 
-Each call to `model_based_parse_params` appends one row to `hyperparameter_search.log.csv`, capturing both the surrogate's state and the decision made at that moment.
+Each call to `model_based_parse_parameters` appends one row to `hyperparameter_search.log.csv`, capturing both the surrogate's state and the decision made at that moment.
 
 | Column | Type | Description |
 |---|---|---|
@@ -236,7 +236,7 @@ Each call to `model_based_parse_params` appends one row to `hyperparameter_searc
 | `coverage_75` | float | Coverage at the 75th percentile (%) at the time of the call |
 
 **Notes:**
-- The file is append-only; one row per `model_based_parse_params` call regardless of which worker produced it.
+- The file is append-only; one row per `model_based_parse_parameters` call regardless of which worker produced it.
 - `explored_mu` / `explored_sigma` reflect the state at call time — subsequent runs may change these values.
 - The log enables post-hoc analysis of how the surrogate's beliefs evolved and whether explored configs were revisited.
 
@@ -262,12 +262,12 @@ Each call to `model_based_parse_params` appends one row to `hyperparameter_searc
 ### Implementation — Surrogate & UCB
 
 - [x] CLI arg wiring — add `--model_based_beta`, `--model_based_target`, `--model_based_estimator_count` to `hyperparameter_search.py`; extend validation; pass through `compile_config` → `load_config`
-- [x] `model_based_parse_params` skeleton — parameter parsing (fixed/categorical/random split), extend `load_config` with `**kwargs` dispatch, read parquet + compute target from list columns
-- [ ] Port surrogate pipeline — `RegularizationLogTransformer` + `RandomForestRegressor` Pipeline from notebook into `src/utils/config.py`
-- [ ] Full-grid UCB scoring — enumerate categorical space, compute per-tree $\hat{\mu}$/$\hat{\sigma}$, argmax with random tie-breaking
-- [ ] Fallback: cold start (no runs → random)
-- [ ] Fallback: sparse data (< 20 runs → random with warning)
-- [ ] ESM + Coverage@75 logging to stdout
+- [x] `model_based_parse_parameters` skeleton — parameter parsing (fixed/categorical/random split), extend `load_config` with `**kwargs` dispatch, read parquet + compute target from list columns
+- [x] Port surrogate pipeline — `Log10Transformer` + `RandomForestRegressor` Pipeline from notebook into `src/utils/config.py`
+- [x] Full-grid UCB scoring — enumerate categorical space, compute per-tree $\hat{\mu}$/$\hat{\sigma}$, argmax with random tie-breaking
+- [x] Fallback: cold start (no runs → random)
+- [x] Fallback: sparse data (< 20 runs → random with warning)
+- [x] ESM + Coverage@75 logging to stdout
 
 ### Logging & Polish
 

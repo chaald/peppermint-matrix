@@ -4,12 +4,16 @@ import json
 import yaml
 import math
 import random
+import itertools
 import wandb
 import pprint
 import numpy as np
 import polars as pl
 
 from wandb.sdk.internal.internal_api import gql
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.pipeline import Pipeline
 from typing import Literal, Union, List, Dict, Tuple
 from src.constant import PROJECT_NAME
 
@@ -237,10 +241,12 @@ def parse_parameter_categories(parameters_config: Dict) -> Tuple[
     Dict[str, Union[int, float, str]],
     Dict[str, List[Union[int, float, str]]],
     Dict[str, Dict[str, Union[int, float, str]]],
+    Dict[str, type],
 ]:
     fixed_parameters: Dict[str, Union[int, float, str]] = {}
     free_categorical_parameters: Dict[str, List[Union[int, float, str]]] = {}
     free_random_parameters: Dict[str, Dict[str, Union[int, float, str]]] = {}
+    categorical_dtypes: Dict[str, type] = {}
     for parameter, parameter_config in parameters_config.items():
         if not isinstance(parameter_config, dict):
             fixed_parameters[parameter] = parse_scientific_notation(parameter_config)
@@ -251,7 +257,9 @@ def parse_parameter_categories(parameters_config: Dict) -> Tuple[
             if distribution == "constant":
                 fixed_parameters[parameter] = parse_scientific_notation(parameter_config["value"])
             elif distribution == "categorical":
-                free_categorical_parameters[parameter] = parse_scientific_notation(parameter_config["values"])
+                values = parse_scientific_notation(parameter_config["values"])
+                free_categorical_parameters[parameter] = values
+                categorical_dtypes[parameter] = type(values[0])
             elif distribution in ["int_uniform", "uniform", "log_uniform"]:
                 free_random_parameters[parameter] = parameter_config
             else:
@@ -262,11 +270,11 @@ def parse_parameter_categories(parameters_config: Dict) -> Tuple[
     # Sort categorical parameters by number of values (descending)
     free_categorical_parameters = dict(sorted(free_categorical_parameters.items(), key=lambda x: len(x[1]), reverse=True))
     
-    return fixed_parameters, free_categorical_parameters, free_random_parameters
+    return fixed_parameters, free_categorical_parameters, free_random_parameters, categorical_dtypes
 
 
 def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
-    fixed_parameters, free_categorical_parameters, free_random_parameters = parse_parameter_categories(parameters_config)
+    fixed_parameters, free_categorical_parameters, free_random_parameters, _ = parse_parameter_categories(parameters_config)
     experiment_runs = fetch_experiment_runs({f"config.{k}": v for k, v in fixed_parameters.items()})
 
     # Pick the least explored categorical configuration
@@ -334,49 +342,159 @@ def parse_score_metric(spec: str) -> Dict[str, float]:
     return result
 
 
-def model_based_parse_params(parameters_config: Dict, beta: float = 1.0, target: str = "epoch/test_recall@20", estimator_count: int = 1024, summary_path: str = "wandb/summary.parquet") -> Dict:
+class Log10Transformer(BaseEstimator, TransformerMixin):
+    """Log10-transform specified columns. Zero maps to a sentinel of -15."""
+
+    LOG_SENTINEL = -15.0
+
+    def __init__(self, feature_names: List[str], log_columns: List[str] = None):
+        self.feature_names = feature_names
+        self.log_columns = log_columns or ["l1_regularization", "l2_regularization"]
+
+    def fit(self, X: np.ndarray, y: np.ndarray = None) -> "Log10Transformer":
+        self.column_indices_ = [
+            self.feature_names.index(c) for c in self.log_columns if c in self.feature_names
+        ]
+        return self
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        X = X.copy()
+        
+        for i in self.column_indices_:
+            col = X[:, i]
+            X[:, i] = np.where(col > 0, np.log10(np.clip(col, 1e-300, None)).round(1), self.LOG_SENTINEL)
+
+        return X
+
+
+def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, target: str = "epoch/test_recall@20", estimator_count: int = 1024, summary_path: str = "wandb/summary.parquet") -> Dict:
     """
     Resolve hyperparameters using a surrogate model with UCB acquisition.
-    Currently falls back to random sampling — surrogate pipeline will be added in a later task.
+    Falls back to random sampling when data is insufficient.
     """
-    fixed_parameters, free_categorical_parameters, free_random_parameters = parse_parameter_categories(parameters_config)
+    fixed_parameters, free_categorical_parameters, free_random_parameters, categorical_dtypes = parse_parameter_categories(parameters_config)
 
-    if os.path.exists(summary_path):
-        runs = pl.read_parquet(summary_path)
-        model_filter = fixed_parameters.get("model", "matrix_factorization")
-        runs = runs.filter(pl.col("model") == model_filter)
-        for key, value in fixed_parameters.items():
-            if key in runs.columns:
-                runs = runs.filter(pl.col(key) == value)
-
-        parsed_target = parse_score_metric(target)
-        eligible_metrics = [m for m in parsed_target if m in runs.columns]
-        if not eligible_metrics:
-            print(f"WARNING: no target metric columns ({list(parsed_target)}) found in parquet — falling back to random")
-        elif len(runs) < 20:
-            print(f"WARNING: only {len(runs)} runs available (< 20) — falling back to random")
-        else:
-            # Compute target metric as a weighted composite of metrics
-            score_expression = sum(pl.col(m) * w for m, w in parsed_target.items())
-            runs = runs.with_columns(score_expression.list.max().alias("target"))
-            
-            categorical_columns = [c for c in free_categorical_parameters if c in runs.columns]
-            if categorical_columns:
-                grouped = runs.group_by(categorical_columns).agg(pl.col("target").mean().alias("target"))
-            else:
-                grouped = runs
-
-            # TODO: fit surrogate, compute UCB, pick best config
-            # For now: fall through to random sampling
-
-    # Fallback: pick a random categorical config
-    sampled_categorical = {k: random.choice(v) for k, v in free_categorical_parameters.items()}
-
-    return {
+    feature_names = list(free_categorical_parameters)
+    random_config = {
         **fixed_parameters,
-        **sampled_categorical,
-        **parse_parameters(free_random_parameters)
+        **{k: random.choice(v) for k, v in free_categorical_parameters.items()},
+        **parse_parameters(free_random_parameters),
     }
+
+    if not feature_names:
+        return random_config
+
+    if not os.path.exists(summary_path):
+        print("WARNING: summary parquet not found — falling back to random")
+        return random_config
+
+    runs = pl.read_parquet(summary_path)
+    model_filter = fixed_parameters.get("model", "matrix_factorization")
+    runs = runs.filter(pl.col("model") == model_filter)
+    for key, value in fixed_parameters.items():
+        if key in runs.columns:
+            runs = runs.filter(pl.col(key) == value)
+
+    parsed_target = parse_score_metric(target)
+    eligible_metrics = [m for m in parsed_target if m in runs.columns]
+    if not eligible_metrics:
+        print(f"WARNING: no target metric columns ({list(parsed_target)}) found in parquet — falling back to random")
+        return random_config
+
+    # Compute target: best weighted composite score per run, then mean per unique config
+    score_expression = sum(pl.col(m) * w for m, w in parsed_target.items())
+    runs = runs.with_columns(score_expression.list.max().alias("target"))
+
+    aggregated = runs.group_by(feature_names).agg(pl.col("target").mean().alias("target"))
+    aggregated = aggregated.drop_nulls(subset=["target"])
+    if "shuffle" in feature_names:
+        aggregated = aggregated.with_columns(pl.col("shuffle").cast(pl.Float64))
+
+    if len(aggregated) < 20:
+        print(f"WARNING: only {len(aggregated)} runs available (< 20) — falling back to random")
+        return random_config
+
+    train_features = aggregated.select(feature_names).to_numpy()
+    train_target = aggregated["target"].to_numpy()
+
+    surrogate = Pipeline([
+        ("log_reg", Log10Transformer(feature_names)),
+        ("rf", RandomForestRegressor(
+            n_estimators=estimator_count,
+            max_features="sqrt",
+            max_samples=0.1,
+            min_samples_leaf=3,
+            oob_score=True,
+            n_jobs=-1,
+            random_state=42,
+        )),
+    ])
+    surrogate.fit(train_features, train_target)
+
+    # Build full grid
+    parameter_space = {col: free_categorical_parameters[col] for col in feature_names}
+    all_combinations = list(itertools.product(*parameter_space.values()))
+    full_grid = pl.DataFrame(
+        {col: [row[i] for row in all_combinations] for i, col in enumerate(feature_names)}
+    )
+    if "shuffle" in feature_names:
+        full_grid = full_grid.with_columns(pl.col("shuffle").cast(pl.Float64))
+
+    # Mark explored cells
+    explored_keys = set(tuple(row) for row in aggregated.select(feature_names).to_numpy().tolist())
+    full_grid = full_grid.with_columns(
+        pl.struct(feature_names)
+        .map_elements(lambda s: tuple(s[c] for c in feature_names) in explored_keys, return_dtype=pl.Boolean)
+        .alias("explored")
+    )
+
+    # Per-tree predictions for μ̂ and σ̂
+    grid_features = full_grid.select(feature_names).to_numpy()
+    grid_features_log = surrogate.named_steps["log_reg"].transform(grid_features)
+    random_forest = surrogate.named_steps["rf"]
+    tree_predictions = np.stack([tree.predict(grid_features_log) for tree in random_forest.estimators_], axis=0)
+    mu_hat = tree_predictions.mean(axis=0)
+    sigma_hat = tree_predictions.std(axis=0)
+
+    full_grid = full_grid.with_columns([
+        pl.Series("mu_hat", mu_hat),
+        pl.Series("sigma_hat", sigma_hat),
+        pl.Series("ucb", mu_hat + beta * sigma_hat),
+    ])
+
+    # ESM
+    mu_best_observed = aggregated["target"].max()
+    best_ucb_idx = full_grid["ucb"].arg_max()
+    ucb_max = full_grid["ucb"][best_ucb_idx]
+    esm = (mu_best_observed / ucb_max) * 100 if ucb_max > 0 else 0.0
+
+    # Coverage at 75th percentile
+    mu_threshold = np.percentile(full_grid["mu_hat"].to_numpy(), 75)
+    top_cells = full_grid.filter(pl.col("mu_hat") >= mu_threshold)
+    coverage_75 = 100.0 * top_cells["explored"].sum() / len(top_cells) if len(top_cells) > 0 else 0.0
+
+    nines = 0
+    while (esm / 100) >= 9 * (10 ** (-nines - 1)) + (1 - 10 ** (-nines)):
+        nines += 1
+        if nines > 10:
+            break
+
+    print(f"{'='*55}")
+    print(f"  ESM:          {esm:.4f}%  ({nines} nines)")
+    print(f"  Coverage@75:  {coverage_75:.2f}%")
+    print(f"  Grid:         {len(full_grid):,} cells")
+    print(f"  Best observed: {mu_best_observed:.6f}")
+    print(f"  Best UCB:      μ̂={full_grid['mu_hat'][best_ucb_idx]:.6f}  σ̂={full_grid['sigma_hat'][best_ucb_idx]:.6f}  UCB={ucb_max:.6f}")
+    print(f"{'='*55}")
+
+    # Pick best config (argmax UCB across all cells, with random tie-breaking)
+    best_ucb = full_grid["ucb"].max()
+    candidates = full_grid.filter(pl.col("ucb") == best_ucb)
+    best_row = candidates.to_dicts()[random.randint(0, len(candidates) - 1)]
+    for col in feature_names:
+        random_config[col] = categorical_dtypes[col](best_row[col])
+
+    return random_config
 
 
 def load_config(config_path: str, method: Literal["random", "exhaustive", "model_based"] = "random", **kwargs) -> Dict:
@@ -399,7 +517,7 @@ def load_config(config_path: str, method: Literal["random", "exhaustive", "model
         elif method == "exhaustive":
             current_run_config.update(exhaustive_parse_parameters(config["parameters"]))
         elif method == "model_based":
-            current_run_config.update(model_based_parse_params(config["parameters"], **kwargs))
+            current_run_config.update(model_based_parse_parameters(config["parameters"], **kwargs))
         else:
             raise ValueError(f"Unsupported hyperparameter search method: {method}")
     else:

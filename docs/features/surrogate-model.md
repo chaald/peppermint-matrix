@@ -32,7 +32,7 @@ The Random Forest naturally provides:
 - $\hat{\mu}$ — mean prediction across all trees (expected score)
 - $\hat{\sigma}$ — std across trees (epistemic uncertainty / how well-explored this region is)
 
-**Preprocessing — `RegularizationLogTransformer`:**
+**Preprocessing — `Log10Transformer`:**
 
 Regularization columns (`l1_regularization`, `l2_regularization`) span many orders of magnitude (e.g. `1e-8` to `1e-4`). A log₁₀ transform is applied as the first step of an sklearn `Pipeline` so that tree splits occur on a log scale, which better reflects the structure of the hyperparameter grid. Configs with zero regularization map to a sentinel value of `-15` (≈ log₁₀(1e-15)). Values are rounded to 1 decimal place after the transform to avoid floating-point precision issues.
 
