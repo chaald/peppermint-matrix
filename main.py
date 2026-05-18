@@ -161,8 +161,8 @@ def main(**config):
         current_run[f"epoch/train_ndcg@{k}"] = model.train_ndcg_history[k]
         current_run[f"epoch/train_mrr@{k}"] = model.train_mrr_history[k]
 
-    if os.path.exists(config["parquet_path"]):
-        existing = pl.read_parquet(config["parquet_path"])
+    if os.path.exists(config["summary_path"]):
+        existing = pl.read_parquet(config["summary_path"])
         current_run = pl.DataFrame([current_run])
         for col in current_run.columns:
             if col in existing.schema:
@@ -170,7 +170,7 @@ def main(**config):
                     pl.col(col).cast(existing.schema[col])
                 )
         combined = pl.concat([existing, current_run], how="diagonal")
-        combined.write_parquet(config["parquet_path"])
+        combined.write_parquet(config["summary_path"])
 
     print(f"{'='*10} Final Results {'='*24}")
     pprint.pprint(results)
@@ -203,6 +203,8 @@ def compile_config(args):
             value = getattr(args, key)
             if value is not None:
                 model_based_kwargs[key.removeprefix("model_based_")] = value
+        if args.summary_path is not None:
+            model_based_kwargs["summary_path"] = args.summary_path
 
     # Load Config File, priority 2
     loaded_config = load_config(args.config, method=args.method, **model_based_kwargs) if args.config is not None else {}
@@ -246,7 +248,7 @@ if __name__ == "__main__":
     parser.add_argument("--random_seed", type=int, default=None)
     parser.add_argument("--store_model", action="store_true", default=False)
     parser.add_argument("--tracker", type=str, default=None, help="Tracking backend. Use 'disabled' to skip wandb entirely.")
-    parser.add_argument("--parquet_path", type=str, default=None, help="Path to the summary parquet file for surrogate training. Overrides configs/default.yaml.")
+    parser.add_argument("--summary_path", type=str, default=None, help="Path to the summary parquet file for surrogate training. Overrides configs/default.yaml.")
     parser.add_argument("--model_based_beta", type=float, default=None, help="Exploration weight for UCB formula. Overrides configs/default.yaml.")
     parser.add_argument("--model_based_target", type=str, default=None, help="Target metric key in parquet. Overrides configs/default.yaml.")
     parser.add_argument("--model_based_estimator_count", type=int, default=None, help="Number of trees in Random Forest surrogate. Overrides configs/default.yaml.")

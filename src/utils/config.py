@@ -1,3 +1,4 @@
+import os
 import re
 import json
 import yaml
@@ -9,7 +10,7 @@ import numpy as np
 import polars as pl
 
 from wandb.sdk.internal.internal_api import gql
-from typing import Literal, Union, List, Dict
+from typing import Literal, Union, List, Dict, Tuple
 from src.constant import PROJECT_NAME
 
 def store_json(data, filepath):
@@ -232,7 +233,11 @@ def fetch_experiment_runs(
 
     return pl.DataFrame(experiment_runs, infer_schema_length=None)
 
-def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
+def parse_parameter_categories(parameters_config: Dict) -> Tuple[
+    Dict[str, Union[int, float, str]],
+    Dict[str, List[Union[int, float, str]]],
+    Dict[str, Dict[str, Union[int, float, str]]],
+]:
     fixed_parameters: Dict[str, Union[int, float, str]] = {}
     free_categorical_parameters: Dict[str, List[Union[int, float, str]]] = {}
     free_random_parameters: Dict[str, Dict[str, Union[int, float, str]]] = {}
@@ -253,11 +258,15 @@ def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
                 raise ValueError(f"Unsupported distribution type: {distribution} for parameter: {parameter}")
         else:
             raise ValueError(f"Invalid parameter configuration for {parameter}: {parameter_config}")
-        
+
     # Sort categorical parameters by number of values (descending)
     free_categorical_parameters = dict(sorted(free_categorical_parameters.items(), key=lambda x: len(x[1]), reverse=True))
+    
+    return fixed_parameters, free_categorical_parameters, free_random_parameters
 
-    # Get latest experiment runs to count existing configurations
+
+def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
+    fixed_parameters, free_categorical_parameters, free_random_parameters = parse_parameter_categories(parameters_config)
     experiment_runs = fetch_experiment_runs({f"config.{k}": v for k, v in fixed_parameters.items()})
 
     # Pick the least explored categorical configuration
@@ -307,8 +316,67 @@ def exhaustive_parse_parameters(parameters_config: Dict) -> Dict:
         **parse_parameters(free_random_parameters)
     }
 
-def model_based_parse_params(parameters_config: Dict, beta: float = 1.0, target: str = "epoch/test_recall@20", estimator_count: int = 1024) -> Dict:
-    """Stub — will be implemented in a later task."""
+def parse_score_metric(spec: str) -> Dict[str, float]:
+    """Parse a score metric spec into a weighted composite dict.
+    
+    Accepts formats:
+        "epoch/test_recall@20"                             → {"epoch/test_recall@20": 1.0}
+        "epoch/test_recall@20:0.7 epoch/test_ndcg@20:0.3"  → {"epoch/test_recall@20": 0.7, ...}
+    """
+    items = spec.split()
+    result = {}
+    for item in items:
+        if ":" in item:
+            metric, weight = item.split(":")
+            result[metric] = float(weight)
+        else:
+            result[item] = 1.0
+    return result
+
+
+def model_based_parse_params(parameters_config: Dict, beta: float = 1.0, target: str = "epoch/test_recall@20", estimator_count: int = 1024, summary_path: str = "wandb/summary.parquet") -> Dict:
+    """
+    Resolve hyperparameters using a surrogate model with UCB acquisition.
+    Currently falls back to random sampling — surrogate pipeline will be added in a later task.
+    """
+    fixed_parameters, free_categorical_parameters, free_random_parameters = parse_parameter_categories(parameters_config)
+
+    if os.path.exists(summary_path):
+        runs = pl.read_parquet(summary_path)
+        model_filter = fixed_parameters.get("model", "matrix_factorization")
+        runs = runs.filter(pl.col("model") == model_filter)
+        for key, value in fixed_parameters.items():
+            if key in runs.columns:
+                runs = runs.filter(pl.col(key) == value)
+
+        parsed_target = parse_score_metric(target)
+        eligible_metrics = [m for m in parsed_target if m in runs.columns]
+        if not eligible_metrics:
+            print(f"WARNING: no target metric columns ({list(parsed_target)}) found in parquet — falling back to random")
+        elif len(runs) < 20:
+            print(f"WARNING: only {len(runs)} runs available (< 20) — falling back to random")
+        else:
+            # Compute target metric as a weighted composite of metrics
+            score_expression = sum(pl.col(m) * w for m, w in parsed_target.items())
+            runs = runs.with_columns(score_expression.list.max().alias("target"))
+            
+            categorical_columns = [c for c in free_categorical_parameters if c in runs.columns]
+            if categorical_columns:
+                grouped = runs.group_by(categorical_columns).agg(pl.col("target").mean().alias("target"))
+            else:
+                grouped = runs
+
+            # TODO: fit surrogate, compute UCB, pick best config
+            # For now: fall through to random sampling
+
+    # Fallback: pick a random categorical config
+    sampled_categorical = {k: random.choice(v) for k, v in free_categorical_parameters.items()}
+
+    return {
+        **fixed_parameters,
+        **sampled_categorical,
+        **parse_parameters(free_random_parameters)
+    }
 
 
 def load_config(config_path: str, method: Literal["random", "exhaustive", "model_based"] = "random", **kwargs) -> Dict:

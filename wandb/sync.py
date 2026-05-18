@@ -20,26 +20,12 @@ from wandb.apis.public import Run
 from wandb.sdk.internal.internal_api import gql
 from typing import Union, List, Dict
 from src.constant import PROJECT_NAME
+from src.utils.config import parse_score_metric
 
 pd.set_option('future.no_silent_downcasting', True)
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*Downcasting behavior in `replace`.*')
 
-def parse_metric_criterion(criterion_list: List[str]) -> Union[str, Dict[str, float]]:
-    criterion_dict = {}
-    for item in criterion_list:
-        if ":" in item:
-            metric, weight = item.split(":")
-            criterion_dict[metric] = float(weight)
-        else:
-            criterion_dict[item] = 1.0
-
-    # If only one metric with weight 1.0, return as string
-    if len(criterion_dict) == 1 and list(criterion_dict.values())[0] == 1.0:
-        return list(criterion_dict.keys())[0]
-    
-    return criterion_dict
-
-def fetch_run_metadata(api: wandb.Api, run_id: str, considered_metrics: Union[str, Dict[str, float]] = "epoch/epoch") -> Dict:
+def fetch_run_metadata(api: wandb.Api, run_id: str, score_metric: Dict[str, float] = {"epoch/epoch": 1.0}) -> Dict:
     """Fetch full metadata for a single run by ID."""
     run: Run = api.run(f"{api.default_entity}/{PROJECT_NAME}/{run_id}")
     
@@ -53,14 +39,12 @@ def fetch_run_metadata(api: wandb.Api, run_id: str, considered_metrics: Union[st
     run_history = run.history()
     run_history = run_history.replace({"Infinity": np.inf, "NaN": np.nan})
 
-    if isinstance(considered_metrics, str):
-        run_history["score"] = run_history[considered_metrics]
-    elif isinstance(considered_metrics, dict):
+    if isinstance(score_metric, dict):
         run_history["score"] = sum(
-            run_history[metric] * weight for metric, weight in considered_metrics.items()
+            run_history[metric] * weight for metric, weight in score_metric.items()
         )
     else:
-        raise ValueError("considered_metrics must be either a string or a dictionary")
+        raise ValueError("score_metric must be a dict")
     
     best_summary = run_history.iloc[run_history["score"].argmax()]
     best_summary = {f"best:{key}": val for key, val in best_summary.items()}
@@ -78,7 +62,7 @@ def fetch_run_metadata(api: wandb.Api, run_id: str, considered_metrics: Union[st
         "cpu_count": run.metadata.get("cpu_count"),
     }
 
-def process_chunk(chunk: List[str], considered_metrics: Union[str, Dict[str, float]], threads_per_process: int = 16) -> List[Dict]:
+def process_chunk(chunk: List[str], score_metric: Dict[str, float], threads_per_process: int = 16) -> List[Dict]:
     """Process a chunk of runs using a shared API object and thread pool."""
     # Each process creates its own API instance
     api = wandb.Api(timeout=180)
@@ -87,7 +71,7 @@ def process_chunk(chunk: List[str], considered_metrics: Union[str, Dict[str, flo
     errors = []
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads_per_process) as executor:
-        futures = {executor.submit(fetch_run_metadata, api, run_id, considered_metrics): run_id for run_id in chunk}
+        futures = {executor.submit(fetch_run_metadata, api, run_id, score_metric): run_id for run_id in chunk}
         
         for future in concurrent.futures.as_completed(futures):
             run_id = futures[future]
@@ -111,15 +95,15 @@ def main(
     process_count: int = 8,
     threads_per_process: int = 32,
     ensure_available_locally: bool = False,
-    sorting_criterion: List[str] = ["epoch/epoch"],
+    score_metric: str = "epoch/epoch",
     output_path: str = "wandb/summary.parquet",
     max_retries: int = 3,
 ):
     api = wandb.Api() # Initialize Weights & Biases API, used for fetching run data
 
-    sorting_criterion = parse_metric_criterion(sorting_criterion)
-    print(f"Using sorting criterion: ")
-    pprint.pprint(sorting_criterion)
+    parsed_score_metric = parse_score_metric(score_metric)
+    print(f"Using score metric: ")
+    pprint.pprint(parsed_score_metric)
     print(f"Max retries for failed runs: {max_retries}")
 
     query = """
@@ -187,7 +171,7 @@ def main(
         # Main processing loop with multiprocessing and multi-threading
         label = f"Retry {attempt}/{max_retries}" if is_retry else "Processing chunks"
         with concurrent.futures.ProcessPoolExecutor(max_workers=process_count, mp_context=ctx) as executor:
-            process_kernel = partial(process_chunk, considered_metrics=sorting_criterion, threads_per_process=threads_per_process)
+            process_kernel = partial(process_chunk, score_metric=parsed_score_metric, threads_per_process=threads_per_process)
             futures = {executor.submit(process_kernel, chunk): i for i, chunk in enumerate(chunks)}
 
             for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc=label):
@@ -258,10 +242,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="matrix_factorization", help="Model name to filter runs")
     parser.add_argument("--ensure_available_locally", action="store_true", help="Filter runs to only those available locally")
-    parser.add_argument("--sorting_criterion", type=str, nargs="+", default=["epoch/epoch"], help="Metric:weight pairs defining the composite score used to select each run's best epoch. Single metric: epoch/epoch. Composite: epoch/test_recall@10:0.5 epoch/test_ndcg@10:0.5 (default: epoch/epoch)")
+    parser.add_argument("--score_metric", type=str, default="epoch/epoch", help="Metric or weighted composite defining the score column used to select each run's best epoch. Single metric: epoch/epoch. Composite: epoch/test_recall@10:0.5 epoch/test_ndcg@10:0.5 (default: epoch/epoch)")
     parser.add_argument("--process_count", type=int, default=8, help="Number of parallel processes to use")
     parser.add_argument("--threads_per_process", type=int, default=32, help="Number of threads per process")
-    parser.add_argument("--output_path", type=str, default="wandb/summary.parquet", help="Path to save the output CSV file")
+    parser.add_argument("--output_path", type=str, default="wandb/summary.parquet", help="Path to save the output parquet file")
     parser.add_argument("--max_retries", type=int, default=3, help="Number of times to retry failed runs")
 
     args = parser.parse_args()
@@ -271,7 +255,7 @@ if __name__ == "__main__":
         process_count=args.process_count,
         threads_per_process=args.threads_per_process,
         ensure_available_locally=args.ensure_available_locally,
-        sorting_criterion=args.sorting_criterion,
+        score_metric=args.score_metric,
         output_path=args.output_path,
         max_retries=args.max_retries,
     )

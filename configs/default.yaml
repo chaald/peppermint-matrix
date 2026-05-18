@@ -50,6 +50,6 @@ parameters:
     value: false
   tracker:
     value: wandb
-  parquet_path:
+  summary_path:
     value: wandb/summary.parquet
   
