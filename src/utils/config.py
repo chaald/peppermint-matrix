@@ -1,10 +1,12 @@
 import os
 import re
+import csv
 import json
 import yaml
 import math
 import random
 import itertools
+from datetime import datetime, timezone
 import wandb
 import pprint
 import numpy as np
@@ -372,6 +374,7 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
     Resolve hyperparameters using a surrogate model with UCB acquisition.
     Falls back to random sampling when data is insufficient.
     """
+    start_time = datetime.now(timezone.utc)
     fixed_parameters, free_categorical_parameters, free_random_parameters, categorical_dtypes = parse_parameter_categories(parameters_config)
 
     feature_names = list(free_categorical_parameters)
@@ -396,16 +399,22 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
             runs = runs.filter(pl.col(key) == value)
 
     parsed_target = parse_score_metric(target)
-    eligible_metrics = [m for m in parsed_target if m in runs.columns]
-    if not eligible_metrics:
-        print(f"WARNING: no target metric columns ({list(parsed_target)}) found in parquet — falling back to random")
-        return random_config
+    missing_metrics = [m for m in parsed_target if m not in runs.columns]
+    if missing_metrics:
+        raise KeyError(
+            f"Target metric(s) {missing_metrics} not found in summary parquet columns. "
+            f"Available epoch metrics: {[c for c in runs.columns if c.startswith('epoch/')]}"
+        )
 
     # Compute target: best weighted composite score per run, then mean per unique config
     score_expression = sum(pl.col(m) * w for m, w in parsed_target.items())
     runs = runs.with_columns(score_expression.list.max().alias("target"))
 
-    aggregated = runs.group_by(feature_names).agg(pl.col("target").mean().alias("target"))
+    aggregated = runs.group_by(feature_names).agg([
+        pl.col("target").mean().alias("target"),
+        pl.col("target").std().alias("explored_sigma"),
+        pl.col("target").count().alias("nruns"),
+    ])
     aggregated = aggregated.drop_nulls(subset=["target"])
     if "shuffle" in feature_names:
         aggregated = aggregated.with_columns(pl.col("shuffle").cast(pl.Float64))
@@ -448,6 +457,10 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
         .alias("explored")
     )
 
+    # Join observed metrics for explored cells (for decision log)
+    observed_agg = aggregated.rename({"target": "explored_mu"}).select([*feature_names, "explored_mu", "explored_sigma", "nruns"])
+    full_grid = full_grid.join(observed_agg, on=feature_names, how="left")
+
     # Per-tree predictions for μ̂ and σ̂
     grid_features = full_grid.select(feature_names).to_numpy()
     grid_features_log = surrogate.named_steps["log_reg"].transform(grid_features)
@@ -479,10 +492,12 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
         if nines > 10:
             break
 
+    explored_percentage = 100.0 * full_grid["explored"].sum() / len(full_grid)
+
     print(f"{'='*55}")
     print(f"  ESM:          {esm:.4f}%  ({nines} nines)")
     print(f"  Coverage@75:  {coverage_75:.2f}%")
-    print(f"  Grid:         {len(full_grid):,} cells")
+    print(f"  Explored:     {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
     print(f"  Best observed: {mu_best_observed:.6f}")
     print(f"  Best UCB:      μ̂={full_grid['mu_hat'][best_ucb_idx]:.6f}  σ̂={full_grid['sigma_hat'][best_ucb_idx]:.6f}  UCB={ucb_max:.6f}")
     print(f"{'='*55}")
@@ -493,6 +508,30 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
     best_row = candidates.to_dicts()[random.randint(0, len(candidates) - 1)]
     for col in feature_names:
         random_config[col] = categorical_dtypes[col](best_row[col])
+
+    # Append to decision log
+    log_path = "hyperparameter_search.log.csv"
+    log_row = {"start_time": start_time.strftime("%Y-%m-%dT%H:%M:%S")}
+    log_row.update({params: value for params, value in random_config.items()})
+    log_row.update({
+        "explored": best_row.get("explored", False),
+        "nruns": best_row.get("nruns"),
+        "explored_percentage": round(explored_percentage, 2),
+        "explored_mu": best_row.get("explored_mu"),
+        "explored_sigma": best_row.get("explored_sigma"),
+        "predicted_mu": best_row.get("mu_hat"),
+        "predicted_sigma": best_row.get("sigma_hat"),
+        "ucb": best_row.get("ucb"),
+        "esm": round(esm, 4) if esm else None,
+        "coverage_75": round(coverage_75, 2) if coverage_75 else None,
+    })
+
+    write_header = not os.path.exists(log_path)
+    with open(log_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(log_row))
+        if write_header:
+            writer.writeheader()
+        writer.writerow(log_row)
 
     return random_config
 

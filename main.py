@@ -203,8 +203,9 @@ def compile_config(args):
             value = getattr(args, key)
             if value is not None:
                 model_based_kwargs[key.removeprefix("model_based_")] = value
-        if args.summary_path is not None:
-            model_based_kwargs["summary_path"] = args.summary_path
+        summary_path = getattr(args, "summary_path", None)
+        if summary_path is not None:
+            model_based_kwargs["summary_path"] = summary_path
 
     # Load Config File, priority 2
     loaded_config = load_config(args.config, method=args.method, **model_based_kwargs) if args.config is not None else {}

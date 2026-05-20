@@ -24,3 +24,6 @@ notebooks/.ipynb_checkpoints/
 wandb/*
 !wandb/sync.py
 !wandb/adjust.py
+
+# Runtime logs
+hyperparameter_search.log.csv

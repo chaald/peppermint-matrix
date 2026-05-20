@@ -271,6 +271,6 @@ Each call to `model_based_parse_parameters` appends one row to `hyperparameter_s
 
 ### Logging & Polish
 
-- [ ] Decision log append (`hyperparameter_search.log.csv` at repo root)
-- [ ] Multi-worker deduplication strategy
-- [ ] Integration tests
+- [x] Decision log append (`hyperparameter_search.log.csv` at repo root)
+- [ ] Multi-worker deduplication strategy (skipped — not needed for current use case)
+- [x] Integration tests — ran `hyperparameter_search.py --method=model_based` with unified config, 2 workers × 2 runs, confirmed parquet append + decision log + surrogate UCB selection all work correctly
