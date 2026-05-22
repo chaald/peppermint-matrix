@@ -395,8 +395,9 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
     model_filter = fixed_parameters.get("model", "matrix_factorization")
     runs = runs.filter(pl.col("model") == model_filter)
     for key, value in fixed_parameters.items():
-        if key in runs.columns:
-            runs = runs.filter(pl.col(key) == value)
+        if key not in runs.columns or isinstance(value, list):
+            continue
+        runs = runs.filter(pl.col(key) == value)
 
     parsed_target = parse_score_metric(target)
     missing_metrics = [m for m in parsed_target if m not in runs.columns]
