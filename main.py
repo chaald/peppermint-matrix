@@ -13,6 +13,7 @@ from wandb.integration.keras import WandbMetricsLogger
 
 from src.constant import PROJECT_NAME
 from src.utils import filter_vocabulary, load_yaml, store_yaml, load_config
+from src.utils.config import fetch_run_metadata
 from src.preprocessing import construct_features_meta
 from src.preprocessing.data_loader import load_data
 from src.sampler import BayesianSampler
@@ -131,46 +132,24 @@ def main(**config):
     if config["tracker"] != "disabled":
         wandb.finish()
 
-    # Append run summary to wandb/summary.parquet for surrogate training
-    current_run = {
-        "run_id": run_id,
-        "run_name": run_name,
-        "sweep_id": sweep_id,
-        "model": config["model"],
-    }
-    for key, value in config.items():
-        if key == "metric":
-            continue
-        current_run[key] = str(value) if isinstance(value, list) else value
+        # Fetch full run metadata from W&B and append to summary parquet
+        tracker_api = wandb.Api()
+        try:
+            current_run = fetch_run_metadata(tracker_api, run_id, max_retries=3)
+        except Exception:
+            print("WARNING: could not fetch run from W&B — skipping parquet append")
+            current_run = None
 
-    current_run["epoch/train_loss"] = model.train_loss_history
-    current_run["epoch/test_loss"] = model.test_loss_history
-
-    cutoffs = config["evaluation_cutoffs"]
-    for k in cutoffs:
-        current_run[f"epoch/test_hitrate@{k}"] = model.test_hitrate_history[k]
-        current_run[f"epoch/test_recall@{k}"] = model.test_recall_history[k]
-        current_run[f"epoch/test_precision@{k}"] = model.test_precision_history[k]
-        current_run[f"epoch/test_map@{k}"] = model.test_map_history[k]
-        current_run[f"epoch/test_ndcg@{k}"] = model.test_ndcg_history[k]
-        current_run[f"epoch/test_mrr@{k}"] = model.test_mrr_history[k]
-        current_run[f"epoch/train_hitrate@{k}"] = model.train_hitrate_history[k]
-        current_run[f"epoch/train_recall@{k}"] = model.train_recall_history[k]
-        current_run[f"epoch/train_precision@{k}"] = model.train_precision_history[k]
-        current_run[f"epoch/train_map@{k}"] = model.train_map_history[k]
-        current_run[f"epoch/train_ndcg@{k}"] = model.train_ndcg_history[k]
-        current_run[f"epoch/train_mrr@{k}"] = model.train_mrr_history[k]
-
-    if os.path.exists(config["summary_path"]):
-        existing = pl.read_parquet(config["summary_path"])
-        current_run = pl.DataFrame([current_run])
-        for col in current_run.columns:
-            if col in existing.schema:
-                current_run = current_run.with_columns(
-                    pl.col(col).cast(existing.schema[col])
-                )
-        combined = pl.concat([existing, current_run], how="diagonal")
-        combined.write_parquet(config["summary_path"])
+        if current_run is not None and os.path.exists(config["summary_path"]):
+            existing = pl.read_parquet(config["summary_path"])
+            current_run = pl.DataFrame([current_run])
+            for col in current_run.columns:
+                if col in existing.schema:
+                    current_run = current_run.with_columns(
+                        pl.col(col).cast(existing.schema[col])
+                    )
+            combined = pl.concat([existing, current_run], how="diagonal")
+            combined.write_parquet(config["summary_path"])
 
     print(f"{'='*10} Final Results {'='*24}")
     pprint.pprint(results)

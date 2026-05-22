@@ -2,6 +2,7 @@ import os
 import re
 import csv
 import json
+import time
 import yaml
 import math
 import random
@@ -13,6 +14,7 @@ import numpy as np
 import polars as pl
 
 from wandb.sdk.internal.internal_api import gql
+from wandb.apis.public import Run
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
@@ -344,6 +346,55 @@ def parse_score_metric(spec: str) -> Dict[str, float]:
     return result
 
 
+def fetch_run_metadata(api: wandb.Api, run_id: str, max_retries: int = 0) -> Dict:
+    """Fetch full metadata for a single run by ID. Retries with exponential backoff if max_retries > 0."""
+    for attempt in range(max_retries + 1):
+        try:
+            run: Run = api.run(f"{api.default_entity}/{PROJECT_NAME}/{run_id}")
+            break
+        except Exception:
+            if attempt < max_retries:
+                time.sleep(3 * (2 ** attempt))
+            else:
+                raise
+
+    run_config = {}
+    for key, value in run.config.items():
+        if isinstance(value, (list, dict)):
+            run_config[key] = str(value)
+        else:
+            run_config[key] = value
+
+    run_history = run.history()
+    run_history = run_history.replace({"Infinity": np.inf, "NaN": np.nan})
+
+    result = {
+        "run_id": run.id,
+        "run_name": run.name,
+        "sweep_id": run.sweep.id if run.sweep else None,
+        "model": run.config.get("model"),
+        "created_at": run.created_at,
+        **run_config,
+        **{metric: run_history[metric].to_list() for metric in run_history},
+        "gpu_type": run.metadata.get("gpu"),
+        "cpu_count": run.metadata.get("cpu_count"),
+    }
+
+    # Compute derived fields
+    runtime_list = result.get("_runtime")
+    if runtime_list and len(runtime_list) > 0:
+        runtime_max = max(runtime_list)
+        result["run_duration_second"] = runtime_max
+        result["run_duration_minute"] = runtime_max / 60
+
+    model_name = result.get("model")
+    sweep = result.get("sweep_id") or "single_runs"
+    local_path = f"./models/{model_name}/{sweep}/{result['run_id']}"
+    result["available_locally"] = os.path.isdir(local_path)
+
+    return result
+
+
 class Log10Transformer(BaseEstimator, TransformerMixin):
     """Log10-transform specified columns. Zero maps to a sentinel of -15."""
 
@@ -361,11 +412,9 @@ class Log10Transformer(BaseEstimator, TransformerMixin):
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         X = X.copy()
-        
         for i in self.column_indices_:
             col = X[:, i]
             X[:, i] = np.where(col > 0, np.log10(np.clip(col, 1e-300, None)).round(1), self.LOG_SENTINEL)
-
         return X
 
 

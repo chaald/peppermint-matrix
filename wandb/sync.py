@@ -6,48 +6,17 @@ import time
 import tqdm
 import wandb
 import json
-import warnings
 import argparse
 import concurrent.futures
-import numpy as np
 import polars as pl
-import pandas as pd
 import multiprocessing as mp
 
 from functools import partial
-from wandb.apis.public import Run
 from wandb.sdk.internal.internal_api import gql
 from typing import List, Dict
 from src.constant import PROJECT_NAME
+from src.utils.config import fetch_run_metadata
 
-pd.set_option('future.no_silent_downcasting', True)
-warnings.filterwarnings('ignore', category=FutureWarning, message='.*Downcasting behavior in `replace`.*')
-
-def fetch_run_metadata(api: wandb.Api, run_id: str) -> Dict:
-    """Fetch full metadata for a single run by ID."""
-    run: Run = api.run(f"{api.default_entity}/{PROJECT_NAME}/{run_id}")
-    
-    run_config = {}
-    for key, value in run.config.items():
-        if isinstance(value, (list, dict)):
-            run_config[key] = str(value)
-        else:
-            run_config[key] = value
-
-    run_history = run.history()
-    run_history = run_history.replace({"Infinity": np.inf, "NaN": np.nan})
-
-    return {
-        "run_id": run.id,
-        "run_name": run.name,
-        "sweep_id": run.sweep.id if run.sweep else None,
-        "model": run.config.get("model"),
-        "created_at": run.created_at,
-        **run_config,
-        **{metric: run_history[metric].to_list() for metric in run_history},
-        "gpu_type": run.metadata.get("gpu"),
-        "cpu_count": run.metadata.get("cpu_count"),
-    }
 
 def process_chunk(chunk: List[str], threads_per_process: int = 16) -> List[Dict]:
     """Process a chunk of runs using a shared API object and thread pool."""
@@ -69,11 +38,13 @@ def process_chunk(chunk: List[str], threads_per_process: int = 16) -> List[Dict]
     
     return {"records": records, "errors": errors}
 
+
 def chunk_list(data: List, chunk_size: int = 128) -> List[List]:
     chunks = []
     for i in range(0, len(data), chunk_size):
         chunks.append(data[i:i + chunk_size])
     return chunks
+
 
 def main(
     model: str = "matrix_factorization",
@@ -173,29 +144,16 @@ def main(
     experiment_runs = experiment_runs.with_columns(
         pl.col("created_at").str.to_datetime("%Y-%m-%dT%H:%M:%SZ")
     )
-        
-    local_run_ids = []
-    if os.path.isdir(f"./models/{model}/"):
-        local_sweep_ids = os.listdir(f"./models/{model}/")
-        for sweep_id in local_sweep_ids:
-            local_run_ids.extend([run_id for run_id in os.listdir(f"./models/{model}/{sweep_id}/")])
-        
-    experiment_runs = experiment_runs.with_columns(
-        available_locally=pl.col("run_id").is_in(local_run_ids)
-    )
 
     if ensure_available_locally:
         experiment_runs = experiment_runs.filter(pl.col("available_locally") == True)
 
     experiment_runs = experiment_runs.sort("_timestamp", descending=False)
-    experiment_runs = experiment_runs.with_columns(
-        run_duration_second=pl.col("_runtime").list.max(),
-        run_duration_minute=(pl.col("_runtime").list.max() / 60)
-    )
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     experiment_runs.write_parquet(output_path)
     print(f"Experiment summary saved to {output_path}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
