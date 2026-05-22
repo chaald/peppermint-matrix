@@ -104,24 +104,27 @@ New notebook to find and validate the right accuracy-oriented hyperparams. No pe
 
 ### Notebook 3 — `convergence_simulation.ipynb` (Simulation)
 
-Focused notebook — loads data, retrains both models with validated hyperparams, runs Monte Carlo simulation.
+Loads data, retrains oracle, then runs Monte Carlo simulation. Uses **real `model_based_parse_parameters`** for UCB config selection (reads/writes a simulated parquet). Computes ESM manually in-notebook for uniform tracking across both strategies.
 
 - [ ] Create `notebooks/parameter_analysis/convergence_simulation.ipynb`
-- [ ] Load parquet data, prepare training matrix (same loading code as the two model notebooks)
-- [ ] Train **oracle RF** using hyperparams validated in Notebook 2
-- [ ] Train **acquisition RF** using hyperparams from `surrogate_model.ipynb` (standard production config)
+- [ ] Load parquet data, prepare training matrix (same loading code as notebook 2)
 - [ ] Build full 20,000-cell grid with `itertools.product`
 - [ ] Compute oracle's global best score (argmax over full grid) for regret calculation
-- [ ] Implement `simulate_trajectory(strategy, beta, n_runs, random_seed)`:
-  - **Warm-up** (runs 1–20): pure random (acquisition model not fit yet)
-  - **For UCB strategy** (runs 21+): fit acquisition RF on explored set → enumerate full grid → compute UCB = μ̂ + β·σ̂ → pick argmax (tie-breaking) → query oracle (oracle_μ̂ + ε, ε ~ N(0, oracle_σ̂)) → mark explored → record ESM, Coverage@75, regret
-  - **For random baseline** (runs 21+): same loop, but pick randomly instead of UCB; still fit acquisition RF to compute ESM for fair comparison
-- [ ] Return history: per-run `(esm, coverage_75, simple_regret, cumulative_regret, config_chosen)`
+- [ ] **Modify `model_based_parse_parameters`** to include `"esm"`, `"coverage_75"`, `"explored_percentage"`, `"predicted_mu"`, `"predicted_sigma"`, and `"ucb"` in its returned dict (backward-compatible `"meta"` sub-dict)
+- [ ] Implement `run_trajectory(strategy, beta, n_runs, seed, output_dir)`:
+  - Maintains its own **simulated parquet** under `output_dir/trajectory_{strategy}_{seed}.parquet` mirroring the real parquet schema (config columns + list column for target metric + `model` column)
+  - **Warm-up** (runs 1–20): pick random config, query oracle, append to simulated parquet
+  - **For UCB strategy** (runs 21+): call `model_based_parse_parameters(config, summary_path=...)` → returns config + ESM/Coverage in meta → query oracle for score → append to simulated parquet
+  - **For random baseline** (runs 21+): pick random config instead, query oracle, append to simulated parquet
+  - **ESM tracking** (both strategies): for UCB, read from return value; for random, call `model_based_parse_parameters` in "probe" mode every N steps to compute ESM without using its config pick
+  - Saves per-run history to `output_dir/history_{strategy}_{seed}.parquet` with columns: `(run, esm, coverage_75, simple_regret, cumulative_regret, config_params...)`
+  - Returns nothing — everything persisted to disk
 - [ ] Parameterize β (default 1.0) to allow β-sweep later
-- [ ] Run 10 trajectories for UCB (β=1.0) across different random seeds
-- [ ] Run 10 trajectories for random baseline (same seeds for paired comparison)
-- [ ] Run β-sweep (optional): trajectories for β ∈ {0.25, 0.5, 1.0, 2.0, 4.0} at 5 seeds each
-- [ ] Persist results to parquet for safe checkpointing
+- [ ] Run 5 trajectories for UCB (β=1.0) across seeds 0–4
+- [ ] Run 5 trajectories for random baseline across seeds 0–4 (paired)
+- [ ] Verify results can be loaded from disk and aggregated into a single DataFrame
+
+**Modular design:** Each trajectory is fully self-contained. Adding more trajectories later is just calling `run_trajectory(...)` with new seeds. Trajectories can be run sequentially or in parallel without conflicts (each writes to a distinct path).
 
 ### Analysis & Visualization
 
