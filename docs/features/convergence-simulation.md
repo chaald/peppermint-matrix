@@ -66,13 +66,13 @@ For each trajectory (repeat N=10 with different random seeds):
 
 ### Files
 
-- `notebooks/parameter_analysis/surrogate_model.ipynb` — trains the **acquisition RF** (existing, just rerun to confirm outputs match)
-- `notebooks/parameter_analysis/oracle_model.ipynb` — validates **oracle RF** hyperparams (accuracy benchmark, no persistence needed)
+- `notebooks/parameter_analysis/surrogate_model.ipynb` — trains the **acquisition RF** (existing, rerun to confirm metrics)
+- `notebooks/parameter_analysis/oracle_model.ipynb` — validates **oracle RF** hyperparams (accuracy benchmark, no persistence)
 - `notebooks/parameter_analysis/convergence_simulation.ipynb` — retrains both models from scratch using validated hyperparams, runs simulation
 
 ### Dependencies
 
-All existing: `polars`, `numpy`, `sklearn`, `matplotlib`, `seaborn`, `scipy`, `joblib`. No GPU needed.
+All existing: `polars`, `numpy`, `sklearn`, `matplotlib`, `seaborn`, `scipy`. No GPU needed.
 
 ### Estimated Runtime
 
@@ -82,12 +82,15 @@ All existing: `polars`, `numpy`, `sklearn`, `matplotlib`, `seaborn`, `scipy`, `j
 
 > **Workflow:** Tasks are implemented one at a time in order. Each task is submitted for review before the next one begins. Do not proceed to the next task until the current one is reviewed and approved.
 
-### Notebook 1 — `surrogate_model.ipynb` (Acquisition RF)
+### Notebook 1 — `surrogate_model.ipynb` (Acquisition RF — verify baseline)
 
-Existing notebook. Rerun to confirm outputs match (OOB R² ≥ 0.98, cliff holdout R² ≥ 0.91).
+Existing notebook. Rerun all cells to confirm the current acquisition RF metrics still hold. No persistence — the final simulation notebook retrains both models from scratch.
 
-- [ ] Rerun all cells, confirm metrics match
-- [ ] Add persistence: save trained pipeline to `models/acquisition_rf.joblib` via `joblib.dump`
+- [x] Rerun all cells, confirm metrics match (OOB R² = 0.9946, cliff holdout R² = 0.9209)
+- [x] Add validation cell: compute σ̂ for explored vs unexplored cells across the full grid
+  - Metric: mean σ̂ on unexplored = **1.70×** mean σ̂ on explored (target: ≥ 1.5×) ✓
+- [x] Document final acquisition hyperparams for the simulation notebook to use
+  - `n_estimators=1024`, `max_features="sqrt"`, `max_samples=0.1`, `min_samples_leaf=1`
 
 ### Notebook 2 — `oracle_model.ipynb` (Oracle RF Validation)
 

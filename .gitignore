@@ -15,7 +15,7 @@ wheels/
 # Jupyter runtime artifacts
 .jupyter_ystore.db
 .jupyter/
-notebooks/.ipynb_checkpoints/
+**/.ipynb_checkpoints/
 
 # Model binaries
 /models/
