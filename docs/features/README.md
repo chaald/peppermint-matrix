@@ -19,6 +19,7 @@ docs/features/
 | Surrogate Model & Exploration Saturation Metric | [surrogate-model.md](surrogate-model.md) | 2026-03-15 | Implemented in notebook |
 | Model-Based Hyperparameter Search | [model-based-hyperparameter-search.md](model-based-hyperparameter-search.md) | 2026-03-15 | Planned |
 | Jupyter MCP Local Setup | [jupyter-mcp.md](jupyter-mcp.md) | 2026-04-24 | Configured locally |
+| Convergence Simulation | [convergence-simulation.md](convergence-simulation.md) | 2026-05-22 | Planned |
 
 ## Template
 
