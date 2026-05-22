@@ -76,9 +76,60 @@ All existing: `polars`, `numpy`, `sklearn`, `matplotlib`, `seaborn`, `scipy`. No
 
 ~30 minutes CPU time for 10 trajectories × 2 strategies × ~1000 simulated runs each.
 
-## Status
+## Task Status
 
-- [ ] Planned
-- [ ] Implementation in notebook
-- [ ] Review results
-- [ ] Update feature index
+> **Workflow:** Tasks are implemented one at a time in order. Each task is submitted for review before the next one begins. Do not proceed to the next task until the current one is reviewed and approved.
+
+### Phase 1 — Notebook Scaffold & Data Preparation
+
+- [ ] Create notebook `notebooks/parameter_analysis/convergence_simulation.ipynb`
+- [ ] Load parquet data, filter MF runs, derive parameter space from unique values (same as `surrogate_model.ipynb`)
+- [ ] Build full 20,000-cell grid with `itertools.product`
+- [ ] Prepare training matrix X, y (drop nulls, cast shuffle to float)
+- [ ] Verify: grid dimensions match existing surrogate_model.ipynb
+
+### Phase 2 — Oracle Model (High Accuracy)
+
+- [ ] Train **oracle RF** with accuracy-oriented hyperparams:
+  - `n_estimators=512`, `max_features=None`, `max_samples=None` (default bootstrap), `min_samples_leaf=1`, `oob_score=True`
+- [ ] Evaluate on cliff holdout: report OOB R² and held-out R² (target: match or exceed 0.986 / 0.920 from surrogate_model.ipynb)
+- [ ] Iterate hyperparams if accuracy is insufficient: try deeper trees (`min_samples_leaf=1`), more estimators, or different `max_features`
+- [ ] Validate per-tree σ̂ is tight across the full grid (oracle should be confident everywhere it has data)
+
+### Phase 3 — Acquisition Model (High Tree Variance)
+
+- [ ] Train **acquisition RF** with diversity-oriented hyperparams:
+  - `n_estimators=1024`, `max_features="sqrt"`, `max_samples=0.1`, `min_samples_leaf=3`, `oob_score=True`
+- [ ] Validate σ̂ distribution is wider than oracle's, especially on unexplored cells
+  - Metric: mean σ̂ on unexplored cells should be ≥ 2× oracle's mean σ̂ on same cells
+- [ ] If diversity is insufficient, iterate: reduce `max_samples` further, increase `n_estimators`, or reduce `min_samples_leaf`
+
+### Phase 4 — Simulation Engine
+
+- [ ] Implement `simulate_trajectory(strategy, beta, n_runs, random_seed)`:
+  - **Warm-up** (runs 1–20): pure random (acquisition model not fit yet)
+  - **For UCB strategy** (runs 21+): fit acquisition RF → enumerate full grid → compute UCB = μ̂ + β·σ̂ → pick argmax with random tie-breaking → query oracle (oracle_μ̂ + ε, ε ~ N(0, oracle_σ̂)) → mark explored → record ESM, Coverage@75, regret
+  - **For random baseline** (runs 21+): same loop, but pick randomly instead of UCB; still fit acquisition RF periodically to compute ESM for fair comparison
+- [ ] Return history: per-run `(esm, coverage_75, simple_regret, cumulative_regret, config_chosen)`
+- [ ] Parameterize β (default 1.0) to allow β-sweep later
+
+### Phase 5 — Run Trajectories & Collect Results
+
+- [ ] Run 10 trajectories for UCB (β=1.0) across different random seeds
+- [ ] Run 10 trajectories for random baseline (same seeds for paired comparison)
+- [ ] Run β-sweep (optional): trajectories for β ∈ {0.25, 0.5, 1.0, 2.0, 4.0} at 5 seeds each
+- [ ] Persist results to parquet for safe checkpointing
+
+### Phase 6 — Analysis & Visualization
+
+- [ ] ESM vs runs curve: mean ± 1σ ribbon for UCB and random, with key thresholds marked (99%, 99.9%)
+- [ ] Simple regret vs runs curve: best-found score vs oracle optimum
+- [ ] Summary table at key milestones (runs = 50, 100, 200, 500, 1000): ESM mean ± std for each strategy
+- [ ] Number of runs required to reach ESM 99% and ESM 99.9% for each strategy
+- [ ] β-sweep comparison plot (if Phase 5 sweep was run)
+
+### Phase 7 — Review & Document
+
+- [ ] Review results and draw conclusions
+- [ ] Update feature index in `docs/features/README.md` with status
+- [ ] Commit notebook and doc changes
