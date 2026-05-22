@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "agent-council",
+  "owner": "team-attention",
+  "repo": "plugins-for-claude-natives",
+  "path": "plugins/agent-council",
+  "branch": "main",
+  "sha": "2d7512dda970299ea86b105c0da7ecb63b418556",
+  "source": "manual"
+}
