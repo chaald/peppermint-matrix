@@ -106,7 +106,6 @@ New notebook to find and validate the right accuracy-oriented hyperparams. No pe
   - Explored σ̂ = 0.000284, Unexplored σ̂ = 0.000310, ratio = 1.09x ✓
 - [x] Document final hyperparams in title cell for the simulation notebook to use
   - `n_estimators=512`, `max_features=None`, `max_samples=None`, `min_samples_leaf=3`
-- [ ] Document final hyperparams in a clear cell at the top for the simulation notebook to use
 
 ### Notebook 3 — `convergence_simulation.ipynb` (Simulation)
 
