@@ -1,8 +1,13 @@
+from typing import Callable, Dict, List, Optional, Set, Tuple
+
 from IPython.display import HTML, display
 import pandas as pd
+from pandas.io.formats.style import Styler
 
-DEFAULT_CURRENCY_METRICS = {"average_order_value", "average_user_value", "gross_market_value"}
-DEFAULT_INTEGER_METRICS = {"date_count"}
+DEFAULT_CURRENCY_METRICS: Set[str] = {"average_order_value", "average_user_value", "gross_market_value"}
+DEFAULT_INTEGER_METRICS: Set[str] = {"date_count"}
+
+TableStyle = List[Dict[str, object]]
 
 TABLE_STYLE_BASE = [
     {"selector": "thead th",
@@ -38,7 +43,9 @@ TABLE_STYLE_WIDE_DATE = TABLE_STYLE_BASE + [
 ]
 
 
-def format_value(value, metric, currency_metrics=None, integer_metrics=None):
+def format_value(value: float, metric: str,
+                 currency_metrics: Optional[Set[str]] = None,
+                 integer_metrics: Optional[Set[str]] = None) -> str:
     if currency_metrics is None:
         currency_metrics = DEFAULT_CURRENCY_METRICS
     if integer_metrics is None:
@@ -50,7 +57,9 @@ def format_value(value, metric, currency_metrics=None, integer_metrics=None):
     return f"{value:.5f}"
 
 
-def format_delta(value, metric, currency_metrics=None, integer_metrics=None):
+def format_delta(value: float, metric: str,
+                 currency_metrics: Optional[Set[str]] = None,
+                 integer_metrics: Optional[Set[str]] = None) -> str:
     if currency_metrics is None:
         currency_metrics = DEFAULT_CURRENCY_METRICS
     if integer_metrics is None:
@@ -63,16 +72,17 @@ def format_delta(value, metric, currency_metrics=None, integer_metrics=None):
     return f"{sign}{value:.5f}"
 
 
-def format_delta_percent(value):
+def format_delta_percent(value: float) -> str:
     sign = "+" if value >= 0 else ""
     return f"{sign}{value:.2f}%"
 
 
-def make_delta_colors(pivot, metric_order, column, green_when_zero_metrics=None):
+def make_delta_colors(pivot: pd.DataFrame, metric_order: List[str], column: str,
+                      green_when_zero_metrics: Optional[Set[str]] = None) -> Callable:
     if green_when_zero_metrics is None:
         green_when_zero_metrics = DEFAULT_INTEGER_METRICS
-    def colorize(col):
-        colors = []
+    def colorize(col: pd.Series) -> List[str]:
+        colors: List[str] = []
         for metric in metric_order:
             val = pivot.loc[metric, column]
             if (metric in green_when_zero_metrics and val == 0) or val > 0:
@@ -85,8 +95,11 @@ def make_delta_colors(pivot, metric_order, column, green_when_zero_metrics=None)
     return colorize
 
 
-def styled_metrics_pivot(pivot, caption, column_order, metric_order,
-                         currency_metrics=None, integer_metrics=None, style=None):
+def styled_metrics_pivot(pivot: pd.DataFrame, caption: str,
+                         column_order: List[str], metric_order: List[str],
+                         currency_metrics: Optional[Set[str]] = None,
+                         integer_metrics: Optional[Set[str]] = None,
+                         style: Optional[TableStyle] = None) -> Styler:
     if style is None:
         style = TABLE_STYLE_WITH_CAPTION
     if currency_metrics is None:
@@ -106,7 +119,7 @@ def styled_metrics_pivot(pivot, caption, column_order, metric_order,
         display_pivot["delta_percent"] = [format_delta_percent(pivot.loc[m, "delta_percent"])
                                           for m in metric_order]
 
-    styler = display_pivot.style.set_caption(caption).set_table_styles(style)
+    styler = display_pivot.style.set_caption(caption).set_table_styles(style)  # type: ignore[arg-type]
 
     if "delta" in pivot.columns:
         styler = styler.apply(make_delta_colors(pivot, metric_order, "delta", integer_metrics),
@@ -118,8 +131,8 @@ def styled_metrics_pivot(pivot, caption, column_order, metric_order,
     return styler
 
 
-def merged_tables_html(tables_with_headings):
-    html_parts = []
+def merged_tables_html(tables_with_headings: List[Tuple[str, Styler]]) -> None:
+    html_parts: List[str] = []
     for index, (heading_text, styler) in enumerate(tables_with_headings):
         margin = "16px" if index == 0 else "20px"
         if heading_text:
@@ -128,7 +141,8 @@ def merged_tables_html(tables_with_headings):
     display(HTML("".join(html_parts)))
 
 
-def data_preview_styled(dataframe, caption=None, style=None):
+def data_preview_styled(dataframe: pd.DataFrame, caption: Optional[str] = None,
+                        style: Optional[TableStyle] = None) -> Styler:
     if style is None:
         style = TABLE_STYLE_BASE
 
@@ -143,4 +157,4 @@ def data_preview_styled(dataframe, caption=None, style=None):
         shown = min(10, total_rows)
         caption = f"Data Preview — first {shown} of {total_rows} rows, {len(preview.columns)} columns"
 
-    return preview.style.set_caption(caption).set_table_styles(style)
+    return preview.style.set_caption(caption).set_table_styles(style)  # type: ignore[arg-type]
