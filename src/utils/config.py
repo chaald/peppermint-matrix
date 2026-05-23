@@ -513,11 +513,11 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
 
     # Per-tree predictions for μ̂ and σ̂
     grid_features = full_grid.select(feature_names).to_numpy()
-    grid_features_log = surrogate.named_steps["log_reg"].transform(grid_features)
+    grid_features_transformed = surrogate.named_steps["log_reg"].transform(grid_features)
     random_forest = surrogate.named_steps["rf"]
-    tree_predictions = np.stack([tree.predict(grid_features_log) for tree in random_forest.estimators_], axis=0)
-    mu_hat = tree_predictions.mean(axis=0)
-    sigma_hat = tree_predictions.std(axis=0)
+    tree_predictions = np.stack([tree.predict(grid_features_transformed) for tree in random_forest.estimators_], axis=1)
+    mu_hat = tree_predictions.mean(axis=1)
+    sigma_hat = tree_predictions.std(axis=1)
 
     full_grid = full_grid.with_columns([
         pl.Series("mu_hat", mu_hat),
@@ -527,14 +527,16 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
 
     # ESM
     mu_best_observed = aggregated["target"].max()
-    best_ucb_idx = full_grid["ucb"].arg_max()
-    ucb_max = full_grid["ucb"][best_ucb_idx]
-    esm = (mu_best_observed / ucb_max) * 100 if ucb_max > 0 else 0.0
+    best_ucb = full_grid["ucb"].max()
+    esm = (mu_best_observed / best_ucb) * 100 if best_ucb > 0 else 0.0
 
-    # Coverage at 75th percentile
-    mu_threshold = np.percentile(full_grid["mu_hat"].to_numpy(), 75)
-    top_cells = full_grid.filter(pl.col("mu_hat") >= mu_threshold)
-    coverage_75 = 100.0 * top_cells["explored"].sum() / len(top_cells) if len(top_cells) > 0 else 0.0
+    # Coverage at multiple percentiles
+    mu_hat_vector = full_grid["mu_hat"].to_numpy()
+    coverage = {}
+    for p in [75, 90, 95, 99]:
+        threshold = np.percentile(mu_hat_vector, p)
+        top_cells = full_grid.filter(pl.col("mu_hat") >= threshold)
+        coverage[p] = 100.0 * top_cells["explored"].sum() / len(top_cells) if len(top_cells) > 0 else 0.0
 
     nines = 0
     while (esm / 100) >= 9 * (10 ** (-nines - 1)) + (1 - 10 ** (-nines)):
@@ -544,55 +546,54 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
 
     explored_percentage = 100.0 * full_grid["explored"].sum() / len(full_grid)
 
+    # Pick best config (argmax UCB across all cells, with random tie-breaking)
+    candidates = full_grid.filter(pl.col("ucb") == best_ucb)
+    selected_candidate = candidates.to_dicts()[random.randint(0, len(candidates) - 1)]
+
     print(f"{'='*55}")
-    print(f"  ESM:          {esm:.4f}%  ({nines} nines)")
-    print(f"  Coverage@75:  {coverage_75:.2f}%")
-    print(f"  Explored:     {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
+    print(f"  ESM:           {esm:.4f}%  ({nines} nines)")
+    print(f"  Coverage@75:   {coverage[75]:.2f}%")
+    print(f"  Coverage@90:   {coverage[90]:.2f}%")
+    print(f"  Coverage@95:   {coverage[95]:.2f}%")
+    print(f"  Coverage@99:   {coverage[99]:.2f}%")
+    print(f"  Explored:      {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
     print(f"  Best observed: {mu_best_observed:.6f}")
-    print(f"  Best UCB:      μ̂={full_grid['mu_hat'][best_ucb_idx]:.6f}  σ̂={full_grid['sigma_hat'][best_ucb_idx]:.6f}  UCB={ucb_max:.6f}")
+    print(f"  Best UCB:      μ̂={selected_candidate['mu_hat']:.6f}  σ̂={selected_candidate['sigma_hat']:.6f}  UCB={best_ucb:.6f}")
     print(f"{'='*55}")
 
-    # Pick best config (argmax UCB across all cells, with random tie-breaking)
-    best_ucb = full_grid["ucb"].max()
-    candidates = full_grid.filter(pl.col("ucb") == best_ucb)
-    best_row = candidates.to_dicts()[random.randint(0, len(candidates) - 1)]
+    selected_config = random_config.copy()
     for col in feature_names:
-        random_config[col] = categorical_dtypes[col](best_row[col])
+        selected_config[col] = categorical_dtypes[col](selected_candidate[col])
 
     # Append to decision log
     log_path = "hyperparameter_search.log.csv"
-    log_row = {"start_time": start_time.strftime("%Y-%m-%dT%H:%M:%S")}
-    log_row.update({params: value for params, value in random_config.items()})
-    log_row.update({
-        "explored": best_row.get("explored", False),
-        "nruns": best_row.get("nruns"),
+    current_metadata = {
+        "selected_explored": selected_candidate.get("explored", False),
+        "selected_nruns": selected_candidate.get("nruns"),
         "explored_percentage": round(explored_percentage, 2),
-        "explored_mu": best_row.get("explored_mu"),
-        "explored_sigma": best_row.get("explored_sigma"),
-        "predicted_mu": best_row.get("mu_hat"),
-        "predicted_sigma": best_row.get("sigma_hat"),
-        "ucb": best_row.get("ucb"),
+        "selected_observed_mu": selected_candidate.get("explored_mu"),
+        "selected_observed_sigma": selected_candidate.get("explored_sigma"),
+        "selected_predicted_mu": selected_candidate.get("mu_hat"),
+        "selected_predicted_sigma": selected_candidate.get("sigma_hat"),
+        "selected_ucb": selected_candidate.get("ucb"),
         "esm": round(esm, 4) if esm else None,
-        "coverage_75": round(coverage_75, 2) if coverage_75 else None,
-    })
+        "coverage@75": round(coverage[75], 2) if coverage[75] else None,
+        "coverage@90": round(coverage[90], 2) if coverage[90] else None,
+        "coverage@95": round(coverage[95], 2) if coverage[95] else None,
+        "coverage@99": round(coverage[99], 2) if coverage[99] else None,
+    }
+    log_record = {"start_time": start_time.strftime("%Y-%m-%dT%H:%M:%S")}
+    log_record.update({params: value for params, value in selected_config.items()})
+    log_record.update(current_metadata)
 
     write_header = not os.path.exists(log_path)
     with open(log_path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(log_row))
+        writer = csv.DictWriter(f, fieldnames=list(log_record))
         if write_header:
             writer.writeheader()
-        writer.writerow(log_row)
+        writer.writerow(log_record)
 
-    current_metadata = {
-        "esm": round(esm, 4),
-        "coverage_75": round(coverage_75, 2),
-        "explored_percentage": round(explored_percentage, 2),
-        "predicted_mu": float(best_row.get("mu_hat")),
-        "predicted_sigma": float(best_row.get("sigma_hat")),
-        "ucb": float(best_row.get("ucb")),
-    }
-
-    return random_config, current_metadata
+    return selected_config, current_metadata
 
 
 def load_config(config_path: str, method: Literal["random", "exhaustive", "model_based"] = "random", **kwargs) -> Dict:
