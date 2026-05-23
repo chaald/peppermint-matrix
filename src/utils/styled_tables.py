@@ -29,15 +29,9 @@ TABLE_STYLE_BASE = [
      "props": [("box-shadow", "inset 0 0 0 1000px rgba(0, 0, 0, 0.06)")]},
     {"selector": "tr:hover th",
      "props": [("box-shadow", "inset 0 0 0 1000px rgba(0, 0, 0, 0.06)")]},
-]
-
-TABLE_STYLE_WITH_CAPTION = TABLE_STYLE_BASE + [
     {"selector": "caption",
-     "props": [("font-size", "13px"), ("font-weight", "bold"), ("text-align", "left"),
-               ("padding-bottom", "10px"), ("color", "#111827")]},
-]
-
-TABLE_STYLE_WIDE_DATE = TABLE_STYLE_BASE + [
+     "props": [("font-size", "16px"), ("font-weight", "700"), ("text-align", "left"),
+               ("padding-bottom", "10px"), ("color", "#1E293B"), ("background-color", "#FFFFFF")]},
     {"selector": "td:nth-child(2)",
      "props": [("text-align", "left"), ("min-width", "130px")]},
 ]
@@ -115,7 +109,7 @@ def styled_metrics_pivot(
     style: Optional[TableStyle] = None
 ) -> Styler:
     if style is None:
-        style = TABLE_STYLE_WITH_CAPTION
+        style = TABLE_STYLE_BASE
     if currency_metrics is None:
         currency_metrics = DEFAULT_CURRENCY_METRICS
     if integer_metrics is None:
@@ -156,22 +150,25 @@ def merged_tables_html(tables_with_headings: List[Tuple[str, Styler]]) -> None:
 
 
 def data_preview_styled(
-    dataframe: pd.DataFrame, 
+    dataframe: pd.DataFrame,
     caption: Optional[str] = None,
-    style: Optional[TableStyle] = None
+    style: Optional[TableStyle] = None,
+    max_rows: int = 10,
 ) -> Styler:
     if style is None:
         style = TABLE_STYLE_BASE
 
-    preview = dataframe.copy().head(10)
-    for column in preview.select_dtypes("float").columns:
-        preview[column] = preview[column].astype("int64")
+    preview = dataframe.copy().head(max_rows)
     if "date_axis" in preview.columns:
         preview["date_axis"] = preview["date_axis"].dt.strftime("%Y-%m-%d")
 
     if caption is None:
         total_rows = len(dataframe)
-        shown = min(10, total_rows)
+        shown = min(max_rows, total_rows)
         caption = f"Data Preview — first {shown} of {total_rows} rows, {len(preview.columns)} columns"
 
-    return preview.style.set_caption(caption).set_table_styles(style)  # type: ignore[arg-type]
+    styler = preview.style.set_caption(caption).set_table_styles(style)  # type: ignore[arg-type]
+    float_cols = preview.select_dtypes("float").columns
+    if len(float_cols):
+        styler = styler.format(subset=float_cols, formatter="{:.6g}")
+    return styler
