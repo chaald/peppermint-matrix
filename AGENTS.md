@@ -136,6 +136,25 @@ def format_value(value: float, metric: str,
 
 Imports must be grouped: standard library → third-party → local, with blank lines between groups.
 
+```python
+# Good
+import os
+import itertools
+
+import numpy as np
+import polars as pl
+from sklearn.ensemble import RandomForestRegressor
+
+from src.utils.config import parse_score_metric
+from src.visualization import set_themes
+
+# Bad — mixed groups, no blank lines
+import os
+import polars as pl
+from src.utils.config import parse_score_metric
+import numpy as np
+```
+
 ---
 
 ### Direct W&B API access
