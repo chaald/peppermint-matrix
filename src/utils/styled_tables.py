@@ -1,8 +1,8 @@
-from typing import Callable, Dict, List, Optional, Set, Tuple
-
-from IPython.display import HTML, display
 import pandas as pd
+
 from pandas.io.formats.style import Styler
+from IPython.display import HTML, display
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 DEFAULT_CURRENCY_METRICS: Set[str] = {"average_order_value", "average_user_value", "gross_market_value"}
 DEFAULT_INTEGER_METRICS: Set[str] = {"date_count"}
@@ -43,9 +43,12 @@ TABLE_STYLE_WIDE_DATE = TABLE_STYLE_BASE + [
 ]
 
 
-def format_value(value: float, metric: str,
-                 currency_metrics: Optional[Set[str]] = None,
-                 integer_metrics: Optional[Set[str]] = None) -> str:
+def format_value(
+    value: float, 
+    metric: str,
+    currency_metrics: Optional[Set[str]] = None,
+    integer_metrics: Optional[Set[str]] = None
+) -> str:
     if currency_metrics is None:
         currency_metrics = DEFAULT_CURRENCY_METRICS
     if integer_metrics is None:
@@ -57,9 +60,12 @@ def format_value(value: float, metric: str,
     return f"{value:.5f}"
 
 
-def format_delta(value: float, metric: str,
-                 currency_metrics: Optional[Set[str]] = None,
-                 integer_metrics: Optional[Set[str]] = None) -> str:
+def format_delta(
+    value: float, 
+    metric: str,
+    currency_metrics: Optional[Set[str]] = None,
+    integer_metrics: Optional[Set[str]] = None
+) -> str:
     if currency_metrics is None:
         currency_metrics = DEFAULT_CURRENCY_METRICS
     if integer_metrics is None:
@@ -77,8 +83,12 @@ def format_delta_percent(value: float) -> str:
     return f"{sign}{value:.2f}%"
 
 
-def make_delta_colors(pivot: pd.DataFrame, metric_order: List[str], column: str,
-                      green_when_zero_metrics: Optional[Set[str]] = None) -> Callable:
+def make_delta_colors(
+    pivot: pd.DataFrame, 
+    metric_order: List[str], 
+    column: str,
+    green_when_zero_metrics: Optional[Set[str]] = None
+) -> Callable:
     if green_when_zero_metrics is None:
         green_when_zero_metrics = DEFAULT_INTEGER_METRICS
     def colorize(col: pd.Series) -> List[str]:
@@ -95,11 +105,15 @@ def make_delta_colors(pivot: pd.DataFrame, metric_order: List[str], column: str,
     return colorize
 
 
-def styled_metrics_pivot(pivot: pd.DataFrame, caption: str,
-                         column_order: List[str], metric_order: List[str],
-                         currency_metrics: Optional[Set[str]] = None,
-                         integer_metrics: Optional[Set[str]] = None,
-                         style: Optional[TableStyle] = None) -> Styler:
+def styled_metrics_pivot(
+    pivot: pd.DataFrame, 
+    caption: str,
+    column_order: List[str], 
+    metric_order: List[str],
+    currency_metrics: Optional[Set[str]] = None,
+    integer_metrics: Optional[Set[str]] = None,
+    style: Optional[TableStyle] = None
+) -> Styler:
     if style is None:
         style = TABLE_STYLE_WITH_CAPTION
     if currency_metrics is None:
@@ -141,8 +155,11 @@ def merged_tables_html(tables_with_headings: List[Tuple[str, Styler]]) -> None:
     display(HTML("".join(html_parts)))
 
 
-def data_preview_styled(dataframe: pd.DataFrame, caption: Optional[str] = None,
-                        style: Optional[TableStyle] = None) -> Styler:
+def data_preview_styled(
+    dataframe: pd.DataFrame, 
+    caption: Optional[str] = None,
+    style: Optional[TableStyle] = None
+) -> Styler:
     if style is None:
         style = TABLE_STYLE_BASE
 

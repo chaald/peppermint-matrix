@@ -117,6 +117,25 @@ df_live_runs = fetch_experiment_runs(...)
 df_parquet = pl.read_parquet(...)
 ```
 
+### Function signatures
+
+Multi-line function signatures must use **one parameter per line** (not hanging indent):
+
+```python
+# Good — one per line
+def format_value(
+    value: float,
+    metric: str,
+    currency_metrics: Optional[Set[str]] = None,
+) -> str:
+
+# Bad — hanging indent
+def format_value(value: float, metric: str,
+                 currency_metrics: Optional[Set[str]] = None) -> str:
+```
+
+Imports must be grouped: standard library → third-party → local, with blank lines between groups.
+
 ---
 
 ### Direct W&B API access
