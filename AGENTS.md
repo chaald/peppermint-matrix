@@ -135,6 +135,18 @@ def format_value(value: float, metric: str,
                  currency_metrics: Optional[Set[str]] = None) -> str:
 ```
 
+### NumPy array naming
+
+Use a `_vector` suffix for NumPy 1-D arrays derived from DataFrames, not `_np`.
+
+```python
+# Good
+explored_mu_vector = explored_mu.to_numpy()
+
+# Bad
+explored_mu_np = explored_mu.to_numpy()
+```
+
 ### Import ordering
 
 Imports must be grouped: standard library → third-party → local, with blank lines between groups.
