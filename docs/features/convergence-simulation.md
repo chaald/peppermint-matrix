@@ -96,7 +96,7 @@ Existing notebook. Rerun all cells to confirm the current acquisition RF metrics
 
 New notebook to find and validate the right accuracy-oriented hyperparams. No persistence — the final hyperparams are retrained in the simulation notebook.
 
-- [ ] Create `notebooks/parameter_analysis/oracle_model.ipynb`
+- [x] Create `notebooks/parameter_analysis/oracle_model.ipynb`
 - [ ] Load parquet data, filter MF runs, prepare training matrix X, y (same loading code as surrogate_model)
 - [ ] Train candidate **oracle RF** with accuracy-oriented hyperparams:
   - `n_estimators=512`, `max_features=None`, `max_samples=None` (default bootstrap), `min_samples_leaf=1`, `oob_score=True`
