@@ -116,7 +116,7 @@ Loads data, retrains oracle, then runs Monte Carlo simulation. Uses **real `mode
 - [x] Build full 20,000-cell grid with `itertools.product`
 - [x] Compute oracle's global best score (argmax over full grid) for regret calculation
   - Global optimum: `[512, 0.0, 1e-07, 1e-07, 0.0]` → score = 0.050739 (explored: YES)
-- [ ] **Modify `model_based_parse_parameters`** to include `"esm"`, `"coverage_75"`, `"explored_percentage"`, `"predicted_mu"`, `"predicted_sigma"`, and `"ucb"` in its returned dict (backward-compatible `"meta"` sub-dict)
+- [x] **Modify `model_based_parse_parameters`** to return `(config_dict, meta_dict)` tuple with `"esm"`, `"coverage_75"`, `"explored_percentage"`, `"predicted_mu"`, `"predicted_sigma"`, and `"ucb"` in meta dict
 - [ ] Implement `run_trajectory(strategy, beta, n_runs, seed, output_dir)`:
   - Maintains its own **simulated parquet** under `output_dir/trajectory_{strategy}_{seed}.parquet` mirroring the real parquet schema (config columns + list column for target metric + `model` column)
   - **Warm-up** (runs 1–20): pick random config, query oracle, append to simulated parquet

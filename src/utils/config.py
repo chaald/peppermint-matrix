@@ -434,11 +434,11 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
     }
 
     if not feature_names:
-        return random_config
+        return random_config, {}
 
     if not os.path.exists(summary_path):
         print("WARNING: summary parquet not found — falling back to random")
-        return random_config
+        return random_config, {}
 
     runs = pl.read_parquet(summary_path)
     model_filter = fixed_parameters.get("model", "matrix_factorization")
@@ -471,7 +471,7 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
 
     if len(aggregated) < 20:
         print(f"WARNING: only {len(aggregated)} runs available (< 20) — falling back to random")
-        return random_config
+        return random_config, {}
 
     train_features = aggregated.select(feature_names).to_numpy()
     train_target = aggregated["target"].to_numpy()
@@ -583,7 +583,16 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
             writer.writeheader()
         writer.writerow(log_row)
 
-    return random_config
+    current_metadata = {
+        "esm": round(esm, 4),
+        "coverage_75": round(coverage_75, 2),
+        "explored_percentage": round(explored_percentage, 2),
+        "predicted_mu": float(best_row.get("mu_hat")),
+        "predicted_sigma": float(best_row.get("sigma_hat")),
+        "ucb": float(best_row.get("ucb")),
+    }
+
+    return random_config, current_metadata
 
 
 def load_config(config_path: str, method: Literal["random", "exhaustive", "model_based"] = "random", **kwargs) -> Dict:
@@ -606,7 +615,8 @@ def load_config(config_path: str, method: Literal["random", "exhaustive", "model
         elif method == "exhaustive":
             current_run_config.update(exhaustive_parse_parameters(config["parameters"]))
         elif method == "model_based":
-            current_run_config.update(model_based_parse_parameters(config["parameters"], **kwargs))
+            config_result, _ = model_based_parse_parameters(config["parameters"], **kwargs)
+            current_run_config.update(config_result)
         else:
             raise ValueError(f"Unsupported hyperparameter search method: {method}")
     else:
