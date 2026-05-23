@@ -21,6 +21,7 @@
 - `uv run pytest tests/test_main.py` or `uv run pytest tests/test_main.py -k <pattern>` for focused checks
 
 ## Workflow
+- Do **not** commit changes unless the user explicitly asks you to.
 - Load `.env` before running any command: `set -a; source .env; set +a` (sets `LD_LIBRARY_PATH` for GPU/cuDNN + Jupyter vars).
 - Check prior runs with `src.utils.config.fetch_experiment_runs(filters)` before starting a new experiment.
 - `hyperparameter_search.py` staggers worker startup by 60 seconds for `exhaustive`; keep that unless you verify the race is gone.
@@ -133,6 +134,8 @@ def format_value(
 def format_value(value: float, metric: str,
                  currency_metrics: Optional[Set[str]] = None) -> str:
 ```
+
+### Import ordering
 
 Imports must be grouped: standard library → third-party → local, with blank lines between groups.
 
