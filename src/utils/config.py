@@ -418,7 +418,7 @@ class Log10Transformer(BaseEstimator, TransformerMixin):
         return X
 
 
-def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, target: str = "epoch/test_recall@20", estimator_count: int = 1024, summary_path: str = "wandb/summary.parquet") -> Dict:
+def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, target: str = "epoch/test_recall@20", estimator_count: int = 1024, summary_path: str = "wandb/summary.parquet", log_path: str = "hyperparameter_search.log.csv") -> Dict:
     """
     Resolve hyperparameters using a surrogate model with UCB acquisition.
     Falls back to random sampling when data is insufficient.
