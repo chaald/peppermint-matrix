@@ -27,13 +27,43 @@
 - `hyperparameter_search.py` staggers worker startup by 60 seconds for `exhaustive`; keep that unless you verify the race is gone.
 - Saved models go under `models/{model}/{sweep_id}/{run_id}/`; `models/` and `wandb/` are ignored by git.
 - When working on a new feature, consult `docs/features/README.md`, create `docs/features/<feature-name>.md`, and update the Feature Index.
+
+### Notebook Kernel Management
+
+**Golden Rule:** If the user gives you a `kernel_id`, use it. Never spawn a fresh kernel when one is already provided — the user's kernel has `sys.path` set up correctly; a fresh kernel does not.
+
+**Protocol for any notebook operation:**
+
+1. **If the user provided a `kernel_id`:**
+   - a. Call `unuse_notebook(notebook_name)` — always, even if nothing is activated.
+   - b. Call `use_notebook(notebook_name, notebook_path, mode="connect", kernel_id=<user's id>)`.
+   - c. If `use_notebook` says "already activated" → you skipped step (a). Go back.
+
+2. **If creating a new notebook** (user explicitly says so, and no `kernel_id` provided):
+   - a. Write the `.ipynb` file under `notebooks/`.
+   - b. Ask the user to open the notebook, run it, and give you the `kernel_id`.
+   - c. Follow case 1 with the provided `kernel_id`.
+
+3. For notebook work, prefer `insert_execute_code_cell`, `read_notebook`, `read_cell`, and `overwrite_cell_source` over manual browser edits.
+
+**NEVER:**
+- Edit notebook code to fix `ModuleNotFoundError: No module named 'src'` — the fix is reconnecting to the user's kernel, not patching imports.
+- Call `use_notebook` without `unuse_notebook` first when the notebook is already activated.
+- Use `mode="create"` when the user gave you a `kernel_id`.
+
+**Error recovery:**
+
+| Symptom | DO NOT | DO THIS |
+|---------|--------|---------|
+| `ModuleNotFoundError: No module named 'src'` | Edit notebook code | `unuse_notebook` → `use_notebook(mode="connect", kernel_id=...`) |
+| `use_notebook` says "already activated" | Retry with different params | `unuse_notebook` first, then retry |
+| `/api/collaboration/session/...` 500 error | Retry indefinitely | Restart JupyterLab from `.venv`, then reconnect |
+
+### Jupyter Infrastructure
 - Start JupyterLab from the repo `.venv` with `.venv/bin/jupyter lab --no-browser --port=5601 --ip=127.0.0.1 --IdentityProvider.token="$JUPYTER_TOKEN"`.
 - Required env vars for the local setup are `JUPYTER_URL`, `JUPYTER_TOKEN`, and `MCP_TOKEN`.
 - Committed package versions for MCP-backed notebook editing are `jupyterlab==4.5.6`, `notebook==7.5.5`, `jupyter-collaboration==4.3.0`, `jupyter-mcp-tools>=0.1.4`, and `datalayer-pycrdt==0.12.17`.
-- If notebook cell insert or edit calls fail on `/api/collaboration/session/...`, restart JupyterLab from the repo `.venv` and reconnect the notebook through MCP.
 - After the collaboration stack is healthy, Jupyter MCP can create notebooks, insert cells, and execute them without manually opening the notebook in the JupyterLab web UI.
-- To create a new notebook, add a valid `.ipynb` file under `notebooks/`, then call `use_notebook` with `mode=create` and a live kernel id (usually `python3`).
-- For notebook work, prefer `insert_execute_code_cell`, `read_notebook`, `read_cell`, and `overwrite_cell_source` over manual browser edits.
 
 ## Feature Docs
 
