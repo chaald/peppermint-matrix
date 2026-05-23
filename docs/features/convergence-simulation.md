@@ -111,7 +111,7 @@ New notebook to find and validate the right accuracy-oriented hyperparams. No pe
 
 Loads data, retrains oracle, then runs Monte Carlo simulation. Uses **real `model_based_parse_parameters`** for UCB config selection (reads/writes a simulated parquet). Computes ESM manually in-notebook for uniform tracking across both strategies.
 
-- [ ] Create `notebooks/parameter_analysis/convergence_simulation.ipynb`
+- [x] Create `notebooks/parameter_analysis/convergence_simulation.ipynb`
 - [ ] Load parquet data, prepare training matrix (same loading code as notebook 2)
 - [ ] Build full 20,000-cell grid with `itertools.product`
 - [ ] Compute oracle's global best score (argmax over full grid) for regret calculation
