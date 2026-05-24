@@ -45,8 +45,8 @@ if __name__ == "__main__":
     parser.add_argument("--model_based_beta", type=float, default=1.0, help="Exploration weight for UCB formula. Only for --method=model_based.")
     parser.add_argument("--model_based_target", type=str, default="epoch/test_recall@20", help="Target metric key in parquet. Supports weighted composite. Only for --method=model_based.")
     parser.add_argument("--model_based_estimator_count", type=int, default=1024, help="Number of trees in Random Forest surrogate. Only for --method=model_based.")
-    parser.add_argument("--virtual_sample_count", type=int, default=0, help="Number of optimistic virtual samples to inject. Only for --method=model_based.")
-    parser.add_argument("--virtual_lambda", type=float, default=3.0, help="Lambda multiplier for virtual sample target = max(best, mean + lambda * std). Only for --method=model_based.")
+    parser.add_argument("--model_based_virtual_sample_count", type=int, default=0, help="Number of optimistic virtual samples to inject. Only for --method=model_based.")
+    parser.add_argument("--model_based_virtual_lambda", type=float, default=3.0, help="Lambda multiplier for virtual sample target = max(best, mean + lambda * std). Only for --method=model_based.")
 
     args = parser.parse_args()
 
