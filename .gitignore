@@ -27,3 +27,6 @@ wandb/*
 
 # Runtime logs
 hyperparameter_search.log.csv
+
+# Simulation trajectories
+wandb/trajectories/
