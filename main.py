@@ -185,6 +185,10 @@ def compile_config(args):
         summary_path = getattr(args, "summary_path", None)
         if summary_path is not None:
             model_based_kwargs["summary_path"] = summary_path
+        for key in ("virtual_sample_count", "virtual_lambda"):
+            value = getattr(args, key)
+            if value is not None:
+                model_based_kwargs[key] = value
 
     # Load Config File, priority 2
     loaded_config = load_config(args.config, method=args.method, **model_based_kwargs) if args.config is not None else {}
@@ -192,7 +196,7 @@ def compile_config(args):
 
     # Override with CLI Arguments, priority 1
     for key, value in vars(args).items():
-        if key in ["nworker", "nruns", "sweep_id", "method", "model_based_beta", "model_based_target", "model_based_estimator_count"]:
+        if key in ["nworker", "nruns", "sweep_id", "method", "model_based_beta", "model_based_target", "model_based_estimator_count", "virtual_sample_count", "virtual_lambda"]:
             continue
 
         if (value is not None and not isinstance(value, bool)) or (isinstance(value, bool) and value == True):
@@ -232,6 +236,8 @@ if __name__ == "__main__":
     parser.add_argument("--model_based_beta", type=float, default=None, help="Exploration weight for UCB formula. Overrides configs/default.yaml.")
     parser.add_argument("--model_based_target", type=str, default=None, help="Target metric key in parquet. Overrides configs/default.yaml.")
     parser.add_argument("--model_based_estimator_count", type=int, default=None, help="Number of trees in Random Forest surrogate. Overrides configs/default.yaml.")
+    parser.add_argument("--virtual_sample_count", type=int, default=None, help="Number of optimistic virtual samples to inject. Only for --method=model_based.")
+    parser.add_argument("--virtual_lambda", type=float, default=None, help="Lambda multiplier for virtual sample target = max(best, mean + lambda * std). Only for --method=model_based.")
 
     args = parser.parse_args()
     config = compile_config(args)

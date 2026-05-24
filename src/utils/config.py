@@ -418,7 +418,16 @@ class Log10Transformer(BaseEstimator, TransformerMixin):
         return X
 
 
-def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, target: str = "epoch/test_recall@20", estimator_count: int = 1024, summary_path: str = "wandb/summary.parquet", log_path: str = "hyperparameter_search.log.csv") -> Dict:
+def model_based_parse_parameters(
+    parameters_config: Dict, 
+    beta: float = 1.0, 
+    target: str = "epoch/test_recall@20", 
+    estimator_count: int = 1024, 
+    summary_path: str = "wandb/summary.parquet", 
+    log_path: str = "hyperparameter_search.log.csv", 
+    virtual_sample_count: int = 0, 
+    virtual_lambda: float = 3.0
+) -> Dict:
     """
     Resolve hyperparameters using a surrogate model with UCB acquisition.
     Falls back to random sampling when data is insufficient.
@@ -473,8 +482,38 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
         print(f"WARNING: only {len(aggregated)} runs available (< 20) — falling back to random")
         return random_config, {}
 
-    train_features = aggregated.select(feature_names).to_numpy()
-    train_target = aggregated["target"].to_numpy()
+    # Build full grid (shared between virtual samples and grid scoring)
+    parameter_space = {col: free_categorical_parameters[col] for col in feature_names}
+    all_combinations = list(itertools.product(*parameter_space.values()))
+
+    # Inject virtual samples to bias the surrogate toward optimism in unexplored space
+    if virtual_sample_count > 0:
+        best_observed = aggregated["target"].max()
+        mean_observed = aggregated["target"].mean()
+        std_observed = aggregated["target"].std()
+        virtual_target = max(best_observed, mean_observed + virtual_lambda * std_observed)
+
+        selected_cells = random.sample(
+            all_combinations,
+            min(virtual_sample_count, len(all_combinations)),
+        )
+
+        virtual_records = [
+            dict(zip(feature_names, cell)) | {"target": virtual_target}
+            for cell in selected_cells
+        ]
+        virtual_samples_dataframe = pl.DataFrame(virtual_records)
+        if "shuffle" in feature_names:
+            virtual_samples_dataframe = virtual_samples_dataframe.with_columns(
+                pl.col("shuffle").cast(pl.Float64)
+            )
+
+        training_data = pl.concat([aggregated, virtual_samples_dataframe], how="diagonal")
+        train_features = training_data.select(feature_names).to_numpy()
+        train_target = training_data["target"].to_numpy()
+    else:
+        train_features = aggregated.select(feature_names).to_numpy()
+        train_target = aggregated["target"].to_numpy()
 
     surrogate = Pipeline([
         ("log_reg", Log10Transformer(feature_names)),
@@ -490,9 +529,7 @@ def model_based_parse_parameters(parameters_config: Dict, beta: float = 1.0, tar
     ])
     surrogate.fit(train_features, train_target)
 
-    # Build full grid
-    parameter_space = {col: free_categorical_parameters[col] for col in feature_names}
-    all_combinations = list(itertools.product(*parameter_space.values()))
+    # Build full grid DataFrame
     full_grid = pl.DataFrame(
         {col: [row[i] for row in all_combinations] for i, col in enumerate(feature_names)}
     )
