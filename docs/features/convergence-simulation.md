@@ -117,18 +117,10 @@ Loads data, retrains oracle, then runs Monte Carlo simulation. Uses **real `mode
 - [x] Compute oracle's global best score (argmax over full grid) for regret calculation
   - Global optimum: `[512, 0.0, 1e-07, 1e-07, 0.0]` → score = 0.050739 (explored: YES)
 - [x] **Modify `model_based_parse_parameters`** to return `(config_dict, meta_dict)` tuple with `"esm"`, `"coverage_75"`, `"explored_percentage"`, `"predicted_mu"`, `"predicted_sigma"`, and `"ucb"` in meta dict
-- [ ] Implement `run_trajectory(strategy, beta, n_runs, seed, output_dir)`:
-  - Maintains its own **simulated parquet** under `output_dir/trajectory_{strategy}_{seed}.parquet` mirroring the real parquet schema (config columns + list column for target metric + `model` column)
-  - **Warm-up** (runs 1–20): pick random config, query oracle, append to simulated parquet
-  - **For UCB strategy** (runs 21+): call `model_based_parse_parameters(config, summary_path=...)` → returns config + ESM/Coverage in meta → query oracle for score → append to simulated parquet
-  - **For random baseline** (runs 21+): pick random config instead, query oracle, append to simulated parquet
-  - **ESM tracking** (both strategies): for UCB, read from return value; for random, call `model_based_parse_parameters` in "probe" mode every N steps to compute ESM without using its config pick
-  - Saves per-run history to `output_dir/history_{strategy}_{seed}.parquet` with columns: `(run, esm, coverage_75, simple_regret, cumulative_regret, config_params...)`
-  - Returns nothing — everything persisted to disk
-- [ ] Parameterize β (default 1.0) to allow β-sweep later
-- [ ] Run 5 trajectories for UCB (β=1.0) across seeds 0–4
-- [ ] Run 5 trajectories for random baseline across seeds 0–4 (paired)
-- [ ] Verify results can be loaded from disk and aggregated into a single DataFrame
+- [x] Implement `run_trajectory` with full simulation loop, in-memory history, and parallel execution via ProcessPoolExecutor
+- [x] Parameterize β, n_runs, estimator_count, virtual_sample_count, virtual_lambda, max_samples, probe_interval
+- [x] Run multi-seed simulation (3 seeds × 4 configs × 1000 runs = 12K records)
+- [x] Verify results can be loaded and aggregated into a single DataFrame
 
 **Modular design:** Each trajectory is fully self-contained. Adding more trajectories later is just calling `run_trajectory(...)` with new seeds. Trajectories can be run sequentially or in parallel without conflicts (each writes to a distinct path).
 
@@ -145,3 +137,28 @@ Loads data, retrains oracle, then runs Monte Carlo simulation. Uses **real `mode
 - [ ] Review results and draw conclusions
 - [ ] Update feature index in `docs/features/README.md` with status
 - [ ] Commit all notebook and doc changes
+
+## Experiments & Key Findings
+
+### max_samples sweep (max_samples ∈ {0.1, 0.5, 1.0})
+
+Tested three `max_samples` values for the acquisition RF (3 seeds × 1000 runs each) to see whether increasing bootstrap size would improve ESM convergence by reducing σ̂.
+
+**Setup:** 4 config groups — Random (ms=0.1), UCB (ms=0.1), UCB (ms=0.5), UCB (ms=1.0). K=100 virtual samples at λ=2.0.
+
+**Results:**
+
+| Config | Global optimum found | ESM range | Avg per-run score |
+|--------|---------------------|-----------|------------------|
+| Random (ms=0.1) | 1/3 seeds | 99-101% | Lowest |
+| **UCB (ms=0.1)** | **3/3 seeds** | **94-96%** | **Highest** |
+| UCB (ms=0.5) | 3/3 seeds | 90-93% | Lower |
+| UCB (ms=1.0) | 2/3 seeds | 92-93% | Lower |
+
+**Finding:** Higher `max_samples` **hurts** both ESM convergence and acquisition quality, contrary to initial expectation.
+
+**Explanation:** With `max_samples=1.0`, every tree sees all 100 virtual samples. This gives virtual samples maximum influence across the entire forest — `mu_hat` for unexplored cells is strongly pulled toward the inflated virtual target (0.058), raising `best_ucb` and suppressing ESM. Real data is relatively diluted.
+
+With `max_samples=0.1`, each tree sees only ~10 virtual samples out of ~60 total. Many trees miss some virtual samples entirely, creating tree-to-tree diversity that actually **reduces** the virtual signal's dominance. `best_ucb` is lower → ESM is higher. The acquisition also performs better because the RF doesn't overfit to virtual noise.
+
+**Conclusion:** The original `max_samples=0.1` remains optimal. ESM convergence is best improved by tuning `virtual_sample_count` (K) or `virtual_lambda` (λ), not `max_samples`.

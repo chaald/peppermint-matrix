@@ -428,6 +428,7 @@ def model_based_parse_parameters(
     virtual_sample_count: int = 100, 
     virtual_lambda: float = 3.0,
     n_jobs: int = -1,
+    max_samples: float = 0.1,
 ) -> Dict:
     """
     Resolve hyperparameters using a surrogate model with UCB acquisition.
@@ -521,7 +522,7 @@ def model_based_parse_parameters(
         ("rf", RandomForestRegressor(
             n_estimators=estimator_count,
             max_features="sqrt",
-            max_samples=0.1,
+            max_samples=max_samples,
             min_samples_leaf=3,
             oob_score=True,
             n_jobs=n_jobs,

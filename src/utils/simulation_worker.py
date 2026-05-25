@@ -25,6 +25,7 @@ def run_trajectory(
     estimator_count=128,
     virtual_sample_count=100,
     virtual_lambda=3.0,
+    max_samples=0.1,
     probe_interval=10,
     output_directory="wandb/trajectories",
     verbose=True,
@@ -32,8 +33,8 @@ def run_trajectory(
     os.makedirs(output_directory, exist_ok=True)
     rng = np.random.RandomState(seed)
 
-    simulated_parquet = os.path.join(output_directory, f"trajectory_{strategy}_{seed}.parquet")
-    log_path = os.path.join(output_directory, f"trajectory_{strategy}_{seed}.log.csv")
+    simulated_parquet = os.path.join(output_directory, f"trajectory_{strategy}_ms{max_samples}_{seed}.parquet")
+    log_path = os.path.join(output_directory, f"trajectory_{strategy}_ms{max_samples}_{seed}.log.csv")
 
     log_transformer = oracle_pipeline.named_steps["log_reg"]
     random_forest = oracle_pipeline.named_steps["rf"]
@@ -58,6 +59,7 @@ def run_trajectory(
                     log_path=log_path,
                     virtual_sample_count=virtual_sample_count,
                     virtual_lambda=virtual_lambda,
+                    max_samples=max_samples,
                 )
             config_tuple = tuple(config_dict[col] for col in feature_names)
         else:
@@ -90,6 +92,7 @@ def run_trajectory(
             "run": run_idx,
             "strategy": strategy,
             "seed": seed,
+            "max_samples": max_samples,
             "score": round(true_score, 6),
             "best_found": round(best_found, 6),
             "simple_regret": round(simple_regret, 6),
@@ -114,6 +117,7 @@ def run_trajectory(
                     log_path=log_path + ".probe",
                     virtual_sample_count=virtual_sample_count,
                     virtual_lambda=virtual_lambda,
+                    max_samples=max_samples,
                 )
             history_record["esm"] = probe_meta.get("esm")
             history_record["coverage_75"] = probe_meta.get("coverage@75")
