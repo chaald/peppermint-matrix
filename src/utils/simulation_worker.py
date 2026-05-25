@@ -1,11 +1,15 @@
 import os
 import io
 import contextlib
+import warnings
+from collections import deque
 
 import numpy as np
 import polars as pl
 
 from src.utils.config import model_based_parse_parameters, parse_parameters
+
+warnings.filterwarnings("ignore", message=".*sklearn.utils.parallel.delayed.*")
 
 
 def run_trajectory(
@@ -36,6 +40,7 @@ def run_trajectory(
 
     simulated_records = []
     history_records = []
+    recent_scores = deque(maxlen=20)
 
     best_found = -np.inf
     cumulative_regret = 0.0
@@ -64,6 +69,7 @@ def run_trajectory(
         tree_preds = np.stack([tree.predict(transformed) for tree in random_forest.estimators_], axis=1)
         oracle_mu = tree_preds.mean()
         true_score = float(oracle_mu)
+        recent_scores.append(true_score)
 
         if true_score > best_found:
             best_found = true_score
@@ -118,7 +124,8 @@ def run_trajectory(
         history_records.append(history_record)
 
         if verbose and (run_idx + 1) % 20 == 0:
-            print(f"  [{strategy.upper()}] seed={seed:2d}  run {run_idx+1:4d}/{n_runs}  best={best_found:.6f}  regret={simple_regret:.6f}", flush=True)
+            ma20 = sum(recent_scores) / len(recent_scores)
+            print(f"[{strategy.upper()}-{seed}] {run_idx+1:4d}/{n_runs}  best={best_found:.6f}  regret={simple_regret:.6f}  ma20={ma20:.6f}", flush=True)
 
     if verbose:
         print(f"  ✓ {strategy} seed={seed}: {len(history_records)} runs", flush=True)
