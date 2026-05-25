@@ -426,7 +426,8 @@ def model_based_parse_parameters(
     summary_path: str = "wandb/summary.parquet", 
     log_path: str = "hyperparameter_search.log.csv", 
     virtual_sample_count: int = 0, 
-    virtual_lambda: float = 3.0
+    virtual_lambda: float = 3.0,
+    n_jobs: int = -1,
 ) -> Dict:
     """
     Resolve hyperparameters using a surrogate model with UCB acquisition.
@@ -523,7 +524,7 @@ def model_based_parse_parameters(
             max_samples=0.1,
             min_samples_leaf=3,
             oob_score=True,
-            n_jobs=-1,
+            n_jobs=n_jobs,
             random_state=42,
         )),
     ])
