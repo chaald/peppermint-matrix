@@ -180,12 +180,12 @@ def compile_config(args):
     # Extract model-based kwargs if applicable
     model_based_kwargs = {}
     if args.method == "model_based":
-        for key in ("model_based_beta", "model_based_target", "model_based_estimator_count",
-                     "model_based_virtual_sample_count", "model_based_virtual_lambda",
-                     "model_based_log_path"):
-            value = getattr(args, key)
+        for key, value in vars(args).items():
+            if not key.startswith("model_based_"):
+                continue
             if value is not None:
                 model_based_kwargs[key.removeprefix("model_based_")] = value
+                
         summary_path = getattr(args, "summary_path", None)
         if summary_path is not None:
             model_based_kwargs["summary_path"] = summary_path
@@ -199,7 +199,7 @@ def compile_config(args):
 
     # Override with CLI Arguments, priority 1
     for key, value in vars(args).items():
-        if key in ["nworker", "nruns", "sweep_id", "method", "model_based_beta", "model_based_target", "model_based_estimator_count", "model_based_virtual_sample_count", "model_based_virtual_lambda", "model_based_log_path"]:
+        if key.startswith("model_based_") or key in ["nworker", "nruns", "sweep_id", "method"]:
             continue
 
         if (value is not None and not isinstance(value, bool)) or (isinstance(value, bool) and value == True):

@@ -426,7 +426,7 @@ def model_based_parse_parameters(
     summary_path: str = "wandb/summary.parquet", 
     log_path: str = "hyperparameter_search.log.csv", 
     virtual_sample_count: int = 100, 
-    virtual_lambda: float = 3.0,
+    virtual_lambda: float = 1.0,
     n_jobs: int = -1,
     max_samples: float = 0.1,
 ) -> Dict:
