@@ -55,7 +55,7 @@ def run_trajectory(
         if strategy == "ucb":
             suppress_output = io.StringIO()
             with contextlib.redirect_stdout(suppress_output):
-                config_dict, meta = model_based_parse_parameters(
+                config_dict, decision_metadata = model_based_parse_parameters(
                     parameters_config,
                     beta=beta,
                     target=target_spec,
@@ -110,12 +110,12 @@ def run_trajectory(
             history_record[col] = config_tuple[i]
 
         if strategy == "ucb":
-            history_record["esm"] = meta.get("esm")
-            history_record["coverage_75"] = meta.get("coverage@75")
+            history_record["esm"] = decision_metadata.get("esm")
+            history_record["coverage_75"] = decision_metadata.get("coverage@75")
         elif run_idx % probe_interval == 0:
             suppress_output = io.StringIO()
             with contextlib.redirect_stdout(suppress_output):
-                _, probe_meta = model_based_parse_parameters(
+                _, probe_metadata = model_based_parse_parameters(
                     parameters_config,
                     beta=beta,
                     target=target_spec,
@@ -126,8 +126,8 @@ def run_trajectory(
                     virtual_lambda=virtual_lambda,
                     max_samples=max_samples,
                 )
-            history_record["esm"] = probe_meta.get("esm")
-            history_record["coverage_75"] = probe_meta.get("coverage@75")
+            history_record["esm"] = probe_metadata.get("esm")
+            history_record["coverage_75"] = probe_metadata.get("coverage@75")
         else:
             history_record["esm"] = None
             history_record["coverage_75"] = None

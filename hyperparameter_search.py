@@ -10,6 +10,7 @@ from functools import partial
 
 from src.constant import PROJECT_NAME
 from src.utils import load_yaml
+from src.utils.config import write_decision_log
 from main import main, compile_config
 
 # ==================================
@@ -27,8 +28,17 @@ def start_agent(sweep_id: str | None = None, nruns: int = 1):
 
 def local_agent(args: argparse.Namespace, nruns: int = 1):
     for _ in range(nruns):
-        run_config = compile_config(args)
-        main(**run_config)
+        run_config, decision_metadata = compile_config(args)
+        report = main(**run_config)
+        if decision_metadata:
+            ordered_decision_metadata = {
+                "run_id": report["run_id"],
+                "run_name": report["run_name"],
+                "sweep_id": report["sweep_id"],
+            }
+            ordered_decision_metadata.update(decision_metadata)
+            log_path = run_config.get("log_path", "hyperparameter_search.log.csv")
+            write_decision_log(ordered_decision_metadata, log_path)
 
 # ==================================
 # Script Entry Point

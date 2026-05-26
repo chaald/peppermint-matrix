@@ -1,4 +1,5 @@
 import os
+import csv
 import sys
 import random
 import wandb
@@ -13,7 +14,7 @@ from wandb.integration.keras import WandbMetricsLogger
 
 from src.constant import PROJECT_NAME
 from src.utils import filter_vocabulary, load_yaml, store_yaml, load_config
-from src.utils.config import fetch_run_metadata
+from src.utils.config import fetch_run_metadata, write_decision_log
 from src.preprocessing import construct_features_meta
 from src.preprocessing.data_loader import load_data
 from src.sampler import BayesianSampler
@@ -167,13 +168,14 @@ def main(**config):
     return {
         "run_id": run_id,
         "run_name": run_name,
+        "sweep_id": sweep_id,
         "config": config,
         "final_metrics": results,
     }
 
 def compile_config(args):
     # Load Default Config, priority 3
-    config = load_config("configs/default.yaml")
+    config, _ = load_config("configs/default.yaml")
 
     # Extract model-based kwargs if applicable
     model_based_kwargs = {}
@@ -189,8 +191,11 @@ def compile_config(args):
             model_based_kwargs["summary_path"] = summary_path
 
     # Load Config File, priority 2
-    loaded_config = load_config(args.config, method=args.method, **model_based_kwargs) if args.config is not None else {}
-    config.update(loaded_config)
+    if args.config is not None:
+        loaded_config, decision_metadata = load_config(args.config, method=args.method, **model_based_kwargs)
+        config.update(loaded_config)
+    else:
+        decision_metadata = {}
 
     # Override with CLI Arguments, priority 1
     for key, value in vars(args).items():
@@ -200,7 +205,7 @@ def compile_config(args):
         if (value is not None and not isinstance(value, bool)) or (isinstance(value, bool) and value == True):
             config[key] = value
 
-    return config
+    return config, decision_metadata
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -239,6 +244,16 @@ if __name__ == "__main__":
     parser.add_argument("--model_based_log_path", type=str, default=None, help="Path for the hyperparameter search decision log. Only for --method=model_based.")
 
     args = parser.parse_args()
-    config = compile_config(args)
+    config, decision_metadata = compile_config(args)
 
-    main(**config)
+    report = main(**config)
+
+    if decision_metadata:
+        ordered_decision_metadata = {
+            "run_id": report["run_id"],
+            "run_name": report["run_name"],
+            "sweep_id": report["sweep_id"],
+        }
+        ordered_decision_metadata.update(decision_metadata)
+        log_path = config.get("log_path", "hyperparameter_search.log.csv")
+        write_decision_log(ordered_decision_metadata, log_path)

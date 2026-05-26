@@ -605,7 +605,9 @@ def model_based_parse_parameters(
         selected_config[col] = categorical_dtypes[col](selected_candidate[col])
 
     # Append to decision log
-    current_metadata = {
+    decision_metadata = {"start_time": start_time.strftime("%Y-%m-%dT%H:%M:%S")}
+    decision_metadata.update({params: value for params, value in selected_config.items()})
+    decision_metadata.update({
         "selected_explored": selected_candidate.get("explored", False),
         "selected_nruns": selected_candidate.get("nruns"),
         "explored_percentage": round(explored_percentage, 2),
@@ -619,22 +621,23 @@ def model_based_parse_parameters(
         "coverage@90": round(coverage[90], 2) if coverage[90] else None,
         "coverage@95": round(coverage[95], 2) if coverage[95] else None,
         "coverage@99": round(coverage[99], 2) if coverage[99] else None,
-    }
-    log_record = {"start_time": start_time.strftime("%Y-%m-%dT%H:%M:%S")}
-    log_record.update({params: value for params, value in selected_config.items()})
-    log_record.update(current_metadata)
+    })
 
+    return selected_config, decision_metadata
+
+
+def write_decision_log(decision_metadata: Dict, log_path: str) -> None:
+    if not decision_metadata:
+        return
     write_header = not os.path.exists(log_path)
     with open(log_path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(log_record))
+        writer = csv.DictWriter(f, fieldnames=list(decision_metadata))
         if write_header:
             writer.writeheader()
-        writer.writerow(log_record)
-
-    return selected_config, current_metadata
+        writer.writerow(decision_metadata)
 
 
-def load_config(config_path: str, method: Literal["random", "exhaustive", "model_based"] = "random", **kwargs) -> Dict:
+def load_config(config_path: str, method: Literal["random", "exhaustive", "model_based"] = "random", **kwargs) -> Tuple[Dict, Dict]:
     """
     Load configuration from a YAML file.
     Will also sample hyperparameters if the config file is for hyperparameter search.
@@ -643,10 +646,11 @@ def load_config(config_path: str, method: Literal["random", "exhaustive", "model
         config_path (str): Path to the YAML configuration file.
         method (Literal["random", "exhaustive", "model_based"]): Method for hyperparameter search.
     Returns:
-        dict: Configuration parameters as a dictionary.
+        tuple: (dict of configuration parameters, dict of decision metadata)
     """
     current_run_config = {}
-    
+    decision_metadata = {}
+
     config = load_yaml(config_path)
     if "parameters" in config:
         if method == "random":
@@ -654,7 +658,7 @@ def load_config(config_path: str, method: Literal["random", "exhaustive", "model
         elif method == "exhaustive":
             current_run_config.update(exhaustive_parse_parameters(config["parameters"]))
         elif method == "model_based":
-            config_result, _ = model_based_parse_parameters(config["parameters"], **kwargs)
+            config_result, decision_metadata = model_based_parse_parameters(config["parameters"], **kwargs)
             current_run_config.update(config_result)
         else:
             raise ValueError(f"Unsupported hyperparameter search method: {method}")
@@ -665,4 +669,4 @@ def load_config(config_path: str, method: Literal["random", "exhaustive", "model
     for key, value in current_run_config.items():
         current_run_config[key] = parse_scientific_notation(value)
 
-    return current_run_config
+    return current_run_config, decision_metadata

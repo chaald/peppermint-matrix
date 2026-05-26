@@ -177,12 +177,13 @@ class TestLoadConfig:
     """Tests for ``load_config`` with plain YAML (no parameters block)."""
 
     def test_loads_plain_yaml(self, sample_yaml_config: str) -> None:
-        config: dict[str, object] = load_config(sample_yaml_config)
+        config, metadata = load_config(sample_yaml_config)
         assert config["model"] == "matrix_factorization"
         assert config["embedding_dimension"] == 16
+        assert metadata == {}
 
     def test_loads_parameters_yaml_random(self, sample_yaml_parameters_config: str) -> None:
-        config: dict[str, object] = load_config(sample_yaml_parameters_config, method="random")
+        config, metadata = load_config(sample_yaml_parameters_config, method="random")
         assert config["model"] == "matrix_factorization"
         assert config["embedding_dimension"] == 16
         assert config["learning_rate"] in [0.01, 0.001]
