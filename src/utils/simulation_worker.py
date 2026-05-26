@@ -1,6 +1,7 @@
 import os
 import io
 import contextlib
+import re
 import warnings
 from collections import deque
 
@@ -28,13 +29,16 @@ def run_trajectory(
     max_samples=0.1,
     probe_interval=10,
     output_directory="wandb/trajectories",
+    label=None,
     verbose=True,
 ):
     os.makedirs(output_directory, exist_ok=True)
     rng = np.random.RandomState(seed)
 
-    simulated_parquet = os.path.join(output_directory, f"trajectory_{strategy}_ms{max_samples}_{seed}.parquet")
-    log_path = os.path.join(output_directory, f"trajectory_{strategy}_ms{max_samples}_{seed}.log.csv")
+    safe_label = re.sub(r'[^a-zA-Z0-9_-]+', '_', (label or strategy)).strip('_')
+
+    simulated_parquet = os.path.join(output_directory, f"trajectory_{safe_label}_{seed}.parquet")
+    log_path = os.path.join(output_directory, f"trajectory_{safe_label}_{seed}.log.csv")
 
     log_transformer = oracle_pipeline.named_steps["log_reg"]
     random_forest = oracle_pipeline.named_steps["rf"]
@@ -42,6 +46,7 @@ def run_trajectory(
     simulated_records = []
     history_records = []
     recent_scores = deque(maxlen=20)
+    trajectory_name = label or f"{strategy}-{seed}"
 
     best_found = -np.inf
     cumulative_regret = 0.0
@@ -93,6 +98,8 @@ def run_trajectory(
             "strategy": strategy,
             "seed": seed,
             "max_samples": max_samples,
+            "virtual_lambda": virtual_lambda,
+            "virtual_sample_count": virtual_sample_count,
             "score": round(true_score, 6),
             "best_found": round(best_found, 6),
             "simple_regret": round(simple_regret, 6),
@@ -129,9 +136,9 @@ def run_trajectory(
 
         if verbose and (run_idx + 1) % 20 == 0:
             ma20 = sum(recent_scores) / len(recent_scores)
-            print(f"[{strategy.upper()}-{seed}] {run_idx+1:4d}/{n_runs}  best={best_found:.6f}  regret={simple_regret:.6f}  ma20={ma20:.6f}", flush=True)
+            print(f"[{trajectory_name}] {run_idx+1:4d}/{n_runs}  best={best_found:.6f}  regret={simple_regret:.6f}  ma20={ma20:.6f}", flush=True)
 
     if verbose:
-        print(f"  ✓ {strategy} seed={seed}: {len(history_records)} runs", flush=True)
+        print(f"  ✓ {trajectory_name}: {len(history_records)} runs", flush=True)
 
     return pl.DataFrame(history_records)
