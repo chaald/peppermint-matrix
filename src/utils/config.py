@@ -605,7 +605,6 @@ def model_based_parse_parameters(
         selected_config[col] = categorical_dtypes[col](selected_candidate[col])
 
     # Append to decision log
-    log_path = "hyperparameter_search.log.csv"
     current_metadata = {
         "selected_explored": selected_candidate.get("explored", False),
         "selected_nruns": selected_candidate.get("nruns"),

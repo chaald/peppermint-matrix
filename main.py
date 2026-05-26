@@ -179,7 +179,8 @@ def compile_config(args):
     model_based_kwargs = {}
     if args.method == "model_based":
         for key in ("model_based_beta", "model_based_target", "model_based_estimator_count",
-                     "model_based_virtual_sample_count", "model_based_virtual_lambda"):
+                     "model_based_virtual_sample_count", "model_based_virtual_lambda",
+                     "model_based_log_path"):
             value = getattr(args, key)
             if value is not None:
                 model_based_kwargs[key.removeprefix("model_based_")] = value
@@ -193,7 +194,7 @@ def compile_config(args):
 
     # Override with CLI Arguments, priority 1
     for key, value in vars(args).items():
-        if key in ["nworker", "nruns", "sweep_id", "method", "model_based_beta", "model_based_target", "model_based_estimator_count", "model_based_virtual_sample_count", "model_based_virtual_lambda"]:
+        if key in ["nworker", "nruns", "sweep_id", "method", "model_based_beta", "model_based_target", "model_based_estimator_count", "model_based_virtual_sample_count", "model_based_virtual_lambda", "model_based_log_path"]:
             continue
 
         if (value is not None and not isinstance(value, bool)) or (isinstance(value, bool) and value == True):
@@ -235,6 +236,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_based_estimator_count", type=int, default=None, help="Number of trees in Random Forest surrogate. Overrides configs/default.yaml.")
     parser.add_argument("--model_based_virtual_sample_count", type=int, default=None, help="Number of optimistic virtual samples to inject. Only for --method=model_based.")
     parser.add_argument("--model_based_virtual_lambda", type=float, default=None, help="Lambda multiplier for virtual sample target = max(best, mean + lambda * std). Only for --method=model_based.")
+    parser.add_argument("--model_based_log_path", type=str, default=None, help="Path for the hyperparameter search decision log. Only for --method=model_based.")
 
     args = parser.parse_args()
     config = compile_config(args)

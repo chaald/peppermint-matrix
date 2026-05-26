@@ -47,6 +47,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_based_estimator_count", type=int, default=1024, help="Number of trees in Random Forest surrogate. Only for --method=model_based.")
     parser.add_argument("--model_based_virtual_sample_count", type=int, default=100, help="Number of optimistic virtual samples to inject. Only for --method=model_based.")
     parser.add_argument("--model_based_virtual_lambda", type=float, default=3.0, help="Lambda multiplier for virtual sample target = max(best, mean + lambda * std). Only for --method=model_based.")
+    parser.add_argument("--model_based_log_path", type=str, default=None, help="Path for the hyperparameter search decision log. Only for --method=model_based.")
 
     args = parser.parse_args()
 
