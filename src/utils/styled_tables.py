@@ -221,8 +221,8 @@ def style_run_density(
 
     # Gradient overlays — come AFTER alt-rows in the stylesheet so they win on overlapping cells
     colormap_pairs = [
-        ("Greens", ["n_runs", "mean_score", "min_score", "max_score"]),
-        ("Reds", ["std_score"]),
+        ("RdYlGn", ["n_runs", "mean_score", "min_score", "max_score"]),
+        ("RdYlGn_r", ["std_score"]),
     ]
     for cmap_name, col_names in colormap_pairs:
         cols = [c for c in col_names if c in dataframe.columns]
