@@ -27,6 +27,7 @@ def run_trajectory(
     virtual_sample_count=100,
     virtual_lambda=3.0,
     max_samples=0.1,
+    min_samples_leaf=3,
     probe_interval=10,
     output_directory="wandb/trajectories",
     label=None,
@@ -65,6 +66,7 @@ def run_trajectory(
                     virtual_sample_count=virtual_sample_count,
                     virtual_lambda=virtual_lambda,
                     max_samples=max_samples,
+                    min_samples_leaf=min_samples_leaf,
                 )
             config_tuple = tuple(config_dict[col] for col in feature_names)
         else:
@@ -100,6 +102,7 @@ def run_trajectory(
             "max_samples": max_samples,
             "virtual_lambda": virtual_lambda,
             "virtual_sample_count": virtual_sample_count,
+            "min_samples_leaf": min_samples_leaf,
             "score": round(true_score, 6),
             "best_found": round(best_found, 6),
             "simple_regret": round(simple_regret, 6),
@@ -125,6 +128,7 @@ def run_trajectory(
                     virtual_sample_count=virtual_sample_count,
                     virtual_lambda=virtual_lambda,
                     max_samples=max_samples,
+                    min_samples_leaf=min_samples_leaf,
                 )
             history_record["esm"] = probe_metadata.get("esm")
             history_record["coverage_75"] = probe_metadata.get("coverage@75")
