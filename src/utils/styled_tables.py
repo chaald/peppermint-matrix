@@ -36,6 +36,11 @@ TABLE_STYLE_BASE = [
      "props": [("text-align", "left"), ("min-width", "130px")]},
 ]
 
+TABLE_STYLE_DENSITY = [
+    d for d in TABLE_STYLE_BASE
+    if d["selector"] not in ["tr:nth-child(even) td", "tr:nth-child(odd) td"]
+]
+
 
 def format_value(
     value: float, 
@@ -171,4 +176,57 @@ def data_preview_styled(
     float_cols = preview.select_dtypes("float").columns
     if len(float_cols):
         styler = styler.format(subset=float_cols, formatter="{:.6g}")
+    return styler
+
+
+def _make_gradient(cmap_name: str) -> Callable:
+    """Factory returning a styler.apply-compatible function with inline bg colors."""
+    import matplotlib.pyplot as plt
+    cmap = plt.get_cmap(cmap_name)
+
+    def _apply(s: pd.Series) -> List[str]:
+        values = s.values.astype(float)
+        vmin, vmax = values.min(), values.max()
+        if vmin == vmax:
+            vmin -= 1e-6
+            vmax += 1e-6
+        normed = (values - vmin) / (vmax - vmin)
+        colors = cmap(normed)
+        return [
+            "background-color: rgba(%d,%d,%d,1)" % (int(r * 255), int(g * 255), int(b * 255))
+            for r, g, b, _ in colors
+        ]
+    return _apply
+
+
+def style_run_density(
+    dataframe: pd.DataFrame,
+    caption: Optional[str] = None,
+    style: Optional[TableStyle] = None,
+    max_rows: int = 10,
+) -> Styler:
+    styler = data_preview_styled(dataframe, caption=caption, style=style or TABLE_STYLE_DENSITY, max_rows=max_rows)
+
+    # Alternating rows via apply (same css specificity as gradients below)
+    def _alt_rows(df: pd.DataFrame) -> pd.DataFrame:
+        even = "background-color: #F8FAFC"
+        odd = "background-color: #FFFFFF"
+        return pd.DataFrame(
+            [[even if i % 2 == 0 else odd for _ in range(df.shape[1])] for i in range(df.shape[0])],
+            index=df.index,
+            columns=df.columns,
+        )
+
+    styler = styler.apply(_alt_rows, axis=None)
+
+    # Gradient overlays — come AFTER alt-rows in the stylesheet so they win on overlapping cells
+    colormap_pairs = [
+        ("Greens", ["n_runs", "mean_score", "min_score", "max_score"]),
+        ("Reds", ["std_score"]),
+    ]
+    for cmap_name, col_names in colormap_pairs:
+        cols = [c for c in col_names if c in dataframe.columns]
+        if cols:
+            styler = styler.apply(_make_gradient(cmap_name), subset=cols)
+
     return styler
