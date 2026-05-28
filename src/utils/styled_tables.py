@@ -179,10 +179,16 @@ def data_preview_styled(
     return styler
 
 
-def _make_gradient(cmap_name: str) -> Callable:
-    """Factory returning a styler.apply-compatible function with inline bg colors."""
+def _make_gradient(cmap_name: str, lightness: float = 0.20) -> Callable:
+    """Factory returning a styler.apply-compatible function with pastel inline bg colors."""
     import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.colors import LinearSegmentedColormap
+
     cmap = plt.get_cmap(cmap_name)
+    sampled = cmap(np.linspace(0, 1, 256))
+    sampled[:, :3] = sampled[:, :3] * (1 - lightness) + lightness
+    light_cmap = LinearSegmentedColormap.from_list(f"{cmap_name}_light", sampled)
 
     def _apply(s: pd.Series) -> List[str]:
         values = s.values.astype(float)
@@ -191,7 +197,7 @@ def _make_gradient(cmap_name: str) -> Callable:
             vmin -= 1e-6
             vmax += 1e-6
         normed = (values - vmin) / (vmax - vmin)
-        colors = cmap(normed)
+        colors = light_cmap(normed)
         return [
             "background-color: rgba(%d,%d,%d,1)" % (int(r * 255), int(g * 255), int(b * 255))
             for r, g, b, _ in colors
