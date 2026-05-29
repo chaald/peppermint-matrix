@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import wandb
 import pprint
 import numpy as np
+import pandas as pd
 import polars as pl
 
 from wandb.sdk.internal.internal_api import gql
@@ -18,6 +19,9 @@ from wandb.apis.public import Run
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import FunctionTransformer
+from sklearn import config_context
 from typing import Literal, Union, List, Dict, Tuple
 from src.constant import PROJECT_NAME
 
@@ -396,47 +400,71 @@ def fetch_run_metadata(api: wandb.Api, run_id: str, max_retries: int = 0) -> Dic
 
 
 class Log10Transformer(BaseEstimator, TransformerMixin):
-    """Log10-transform specified columns. Zero maps to a sentinel of -15."""
+    """Log10-transform columns. When inline_replace=True, replaces in-place.
+    When inline_replace=False, appends log10 columns with _log10 suffix."""
 
     LOG_SENTINEL = -15.0
 
-    def __init__(self, feature_names: List[str], log_columns: List[str] = []):
-        self.feature_names = feature_names
-        self.log_columns = log_columns
+    def __init__(self, inline_replace: bool = True):
+        self.inline_replace = inline_replace
 
-    def fit(self, X: np.ndarray, y: np.ndarray = None) -> "Log10Transformer":
-        self.column_indices_ = [
-            self.feature_names.index(c) for c in self.log_columns if c in self.feature_names
-        ]
+    def fit(self, features, target=None) -> "Log10Transformer":
         return self
 
-    def transform(self, X: np.ndarray) -> np.ndarray:
-        X = X.copy()
-        for i in self.column_indices_:
-            col = X[:, i]
-            X[:, i] = np.where(col > 0, np.log10(np.clip(col, 1e-300, None)).round(1), self.LOG_SENTINEL)
-        return X
+    def transform(self, features) -> pd.DataFrame:
+        if not isinstance(features, pl.DataFrame):
+            features = pl.DataFrame(features)
+        for column in features.columns:
+            features = features.with_columns(
+                pl.when(pl.col(column) > 0)
+                .then(pl.col(column).clip(1e-300, None).log10().round(1))
+                .otherwise(self.LOG_SENTINEL)
+                .alias(column if self.inline_replace else f"{column}_log10")
+            )
+        return features.to_pandas()
+
+    def get_feature_names_out(self, input_features: np.ndarray = None) -> List[str]:
+        retval = None
+        if input_features is not None:
+            retval = list(input_features)
+            if not self.inline_replace:
+                for column in list(input_features):
+                    retval.append(f"{column}_log10")
+        return retval
 
 
 class Log2Transformer(BaseEstimator, TransformerMixin):
-    """Log2-transform specified numeric columns and append as additional features."""
+    """Log2-transform columns. When inline_replace=True, replaces in-place.
+    When inline_replace=False, appends log2 columns with _log2 suffix."""
 
-    def __init__(self, feature_names: List[str], log_columns: List[str] = []):
-        self.feature_names = feature_names
-        self.log_columns = log_columns
+    LOG_SENTINEL = -15.0
 
-    def fit(self, X: np.ndarray, y: np.ndarray = None) -> "Log2Transformer":
-        self.column_indices_ = [
-            i for i, c in enumerate(self.feature_names) if c in self.log_columns
-        ]
+    def __init__(self, inline_replace: bool = True):
+        self.inline_replace = inline_replace
+
+    def fit(self, features, target=None) -> "Log2Transformer":
         return self
 
-    def transform(self, X: np.ndarray) -> np.ndarray:
-        X = X.copy()
-        for i in self.column_indices_:
-            col = np.clip(X[:, i], 1e-300, None)
-            X = np.column_stack([X, np.log2(col)])
-        return X
+    def transform(self, features) -> pd.DataFrame:
+        if not isinstance(features, pl.DataFrame):
+            features = pl.DataFrame(features)
+        for column in features.columns:
+            features = features.with_columns(
+                pl.when(pl.col(column) > 0)
+                .then(pl.col(column).clip(1e-300, None).log(2).round(1))
+                .otherwise(self.LOG_SENTINEL)
+                .alias(column if self.inline_replace else f"{column}_log2")
+            )
+        return features.to_pandas()
+
+    def get_feature_names_out(self, input_features: np.ndarray = None) -> List[str]:
+        retval = None
+        if input_features is not None:
+            retval = list(input_features)
+            if not self.inline_replace:
+                for column in list(input_features):
+                    retval.append(f"{column}_log2")
+        return retval
 
 
 def model_based_parse_parameters(
@@ -533,16 +561,26 @@ def model_based_parse_parameters(
             )
 
         training_data = pl.concat([aggregated, virtual_samples_dataframe], how="diagonal")
-        train_features = training_data.select(feature_names).to_numpy()
         train_target = training_data["target"].to_numpy()
     else:
-        train_features = aggregated.select(feature_names).to_numpy()
+        aggregated = aggregated.drop_nulls(subset=["target"])
         train_target = aggregated["target"].to_numpy()
+        training_data = aggregated
+
+    # Build ColumnTransformer — handles column selection per transformer
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("shuffle", FunctionTransformer(lambda x: x, validate=True, feature_names_out="one-to-one"), ["shuffle"]),
+            ("log2", Log2Transformer(inline_replace=False), ["embedding_dimension"]),
+            ("log10", Log10Transformer(inline_replace=True), ["l1_regularization", "l2_regularization"]),
+        ],
+        remainder="passthrough",
+        verbose_feature_names_out=False,
+    )
 
     surrogate = Pipeline([
-        ("log2", Log2Transformer(feature_names, log_columns=["embedding_dimension"])),
-        ("log10", Log10Transformer(feature_names, log_columns=["l1_regularization", "l2_regularization"])),
-        ("rf", RandomForestRegressor(
+        ("preprocessor", preprocessor),
+        ("random_forest", RandomForestRegressor(
             n_estimators=estimator_count,
             max_features="sqrt",
             max_samples=max_samples,
@@ -552,7 +590,11 @@ def model_based_parse_parameters(
             random_state=42,
         )),
     ])
-    surrogate.fit(train_features, train_target)
+
+    # Pass Polars DataFrame so ColumnTransformer selects columns by name
+    with config_context(transform_output="pandas"):
+        train_features_pd = training_data.select(feature_names)
+        surrogate.fit(train_features_pd, train_target)
 
     # Build full grid DataFrame
     full_grid = pl.DataFrame(
@@ -574,13 +616,13 @@ def model_based_parse_parameters(
     full_grid = full_grid.join(observed_agg, on=feature_names, how="left")
 
     # Per-tree predictions for μ̂ and σ̂
-    grid_features = full_grid.select(feature_names).to_numpy()
-    grid_features_transformed = surrogate.named_steps["log2"].transform(grid_features)
-    grid_features_transformed = surrogate.named_steps["log10"].transform(grid_features_transformed)
-    random_forest = surrogate.named_steps["rf"]
-    tree_predictions = np.stack([tree.predict(grid_features_transformed) for tree in random_forest.estimators_], axis=1)
-    mu_hat = tree_predictions.mean(axis=1)
-    sigma_hat = tree_predictions.std(axis=1)
+    with config_context(transform_output="pandas"):
+        grid_features_pd = full_grid.select(feature_names)
+        grid_transformed = surrogate.named_steps["preprocessor"].transform(grid_features_pd)
+        random_forest = surrogate.named_steps["random_forest"]
+        tree_predictions = np.stack([tree.predict(grid_transformed.to_numpy()) for tree in random_forest.estimators_], axis=1)
+        mu_hat = tree_predictions.mean(axis=1)
+        sigma_hat = tree_predictions.std(axis=1)
 
     full_grid = full_grid.with_columns([
         pl.Series("mu_hat", mu_hat),
