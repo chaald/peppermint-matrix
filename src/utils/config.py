@@ -540,7 +540,8 @@ def model_based_parse_parameters(
         train_target = aggregated["target"].to_numpy()
 
     surrogate = Pipeline([
-        ("log_reg", Log10Transformer(feature_names, log_columns=["l1_regularization", "l2_regularization"])),
+        ("log2", Log2Transformer(feature_names, log_columns=["embedding_dimension"])),
+        ("log10", Log10Transformer(feature_names, log_columns=["l1_regularization", "l2_regularization"])),
         ("rf", RandomForestRegressor(
             n_estimators=estimator_count,
             max_features="sqrt",
@@ -574,7 +575,8 @@ def model_based_parse_parameters(
 
     # Per-tree predictions for μ̂ and σ̂
     grid_features = full_grid.select(feature_names).to_numpy()
-    grid_features_transformed = surrogate.named_steps["log_reg"].transform(grid_features)
+    grid_features_transformed = surrogate.named_steps["log2"].transform(grid_features)
+    grid_features_transformed = surrogate.named_steps["log10"].transform(grid_features_transformed)
     random_forest = surrogate.named_steps["rf"]
     tree_predictions = np.stack([tree.predict(grid_features_transformed) for tree in random_forest.estimators_], axis=1)
     mu_hat = tree_predictions.mean(axis=1)
