@@ -400,9 +400,9 @@ class Log10Transformer(BaseEstimator, TransformerMixin):
 
     LOG_SENTINEL = -15.0
 
-    def __init__(self, feature_names: List[str], log_columns: List[str] = None):
+    def __init__(self, feature_names: List[str], log_columns: List[str] = []):
         self.feature_names = feature_names
-        self.log_columns = log_columns or ["l1_regularization", "l2_regularization"]
+        self.log_columns = log_columns
 
     def fit(self, X: np.ndarray, y: np.ndarray = None) -> "Log10Transformer":
         self.column_indices_ = [
@@ -415,6 +415,27 @@ class Log10Transformer(BaseEstimator, TransformerMixin):
         for i in self.column_indices_:
             col = X[:, i]
             X[:, i] = np.where(col > 0, np.log10(np.clip(col, 1e-300, None)).round(1), self.LOG_SENTINEL)
+        return X
+
+
+class Log2Transformer(BaseEstimator, TransformerMixin):
+    """Log2-transform specified numeric columns and append as additional features."""
+
+    def __init__(self, feature_names: List[str], log_columns: List[str] = []):
+        self.feature_names = feature_names
+        self.log_columns = log_columns
+
+    def fit(self, X: np.ndarray, y: np.ndarray = None) -> "Log2Transformer":
+        self.column_indices_ = [
+            i for i, c in enumerate(self.feature_names) if c in self.log_columns
+        ]
+        return self
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        X = X.copy()
+        for i in self.column_indices_:
+            col = np.clip(X[:, i], 1e-300, None)
+            X = np.column_stack([X, np.log2(col)])
         return X
 
 
@@ -519,7 +540,7 @@ def model_based_parse_parameters(
         train_target = aggregated["target"].to_numpy()
 
     surrogate = Pipeline([
-        ("log_reg", Log10Transformer(feature_names)),
+        ("log_reg", Log10Transformer(feature_names, log_columns=["l1_regularization", "l2_regularization"])),
         ("rf", RandomForestRegressor(
             n_estimators=estimator_count,
             max_features="sqrt",
