@@ -210,6 +210,8 @@ def style_run_density(
     caption: Optional[str] = None,
     style: Optional[TableStyle] = None,
     max_rows: int = 10,
+    ascending_columns: Optional[List[str]] = [],
+    descending_columns: Optional[List[str]] = [],
 ) -> Styler:
     styler = data_preview_styled(dataframe, caption=caption, style=style or TABLE_STYLE_DENSITY, max_rows=max_rows)
 
@@ -226,9 +228,11 @@ def style_run_density(
     styler = styler.apply(_alt_rows, axis=None)
 
     # Gradient overlays — come AFTER alt-rows in the stylesheet so they win on overlapping cells
+    # ascending_columns: low = good → RdYlGn_r (reversed, green at bottom)
+    # descending_columns: high = good → RdYlGn (normal, green at top)
     colormap_pairs = [
-        ("RdYlGn", ["n_runs", "mean_score", "min_score", "max_score"]),
-        ("RdYlGn_r", ["std_score"]),
+        ("RdYlGn_r", ascending_columns),
+        ("RdYlGn", descending_columns),
     ]
     for cmap_name, col_names in colormap_pairs:
         cols = [c for c in col_names if c in dataframe.columns]

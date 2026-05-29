@@ -30,3 +30,6 @@ hyperparameter_search.log.csv
 
 # Simulation trajectories
 wandb/trajectories/
+
+# OpenCode magic-context plugin artifacts
+/.opencode/magic-context/
