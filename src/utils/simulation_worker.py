@@ -7,6 +7,7 @@ from collections import deque
 
 import numpy as np
 import polars as pl
+import sklearn
 
 from src.utils.config import model_based_parse_parameters, parse_parameters
 
@@ -41,8 +42,8 @@ def run_trajectory(
     simulated_parquet = os.path.join(output_directory, f"trajectory_{safe_label}_{seed}.parquet")
     log_path = os.path.join(output_directory, f"trajectory_{safe_label}_{seed}.log.csv")
 
-    log_transformer = oracle_pipeline.named_steps["log_reg"]
-    random_forest = oracle_pipeline.named_steps["rf"]
+    preprocessor = oracle_pipeline.named_steps["preprocess"]
+    random_forest = oracle_pipeline.named_steps["random_forest"]
 
     simulated_records = []
     history_records = []
@@ -73,9 +74,10 @@ def run_trajectory(
             config_dict = parse_parameters(parameters_config)
             config_tuple = tuple(config_dict[col] for col in feature_names)
 
-        config_vector = np.array([[config_tuple[i] for i, col in enumerate(feature_names)]])
-        transformed = log_transformer.transform(config_vector)
-        tree_preds = np.stack([tree.predict(transformed) for tree in random_forest.estimators_], axis=1)
+        config_df = pl.DataFrame({col: [config_tuple[i]] for i, col in enumerate(feature_names)})
+        with sklearn.config_context(transform_output="pandas"):
+            transformed = preprocessor.transform(config_df)
+        tree_preds = np.stack([tree.predict(transformed.to_numpy()) for tree in random_forest.estimators_], axis=1)
         oracle_mu = tree_preds.mean()
         true_score = float(oracle_mu)
         recent_scores.append(true_score)
@@ -99,6 +101,8 @@ def run_trajectory(
             "run": run_idx,
             "strategy": strategy,
             "seed": seed,
+            "beta": beta,
+            "estimator_count": estimator_count,
             "max_samples": max_samples,
             "virtual_lambda": virtual_lambda,
             "virtual_sample_count": virtual_sample_count,

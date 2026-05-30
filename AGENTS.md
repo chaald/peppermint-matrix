@@ -58,6 +58,7 @@
 | `ModuleNotFoundError: No module named 'src'` | Edit notebook code | `unuse_notebook` → `use_notebook(mode="connect", kernel_id=...`) |
 | `use_notebook` says "already activated" | Retry with different params | `unuse_notebook` first, then retry |
 | `/api/collaboration/session/...` 500 error | Retry indefinitely | Restart JupyterLab from `.venv`, then reconnect |
+| MCP shows **0 cells** for a notebook that has cells | Assume server restarted when it didn't | **Step 1:** Kill ALL jupyter processes with `pkill -u $(whoami) -f jupyter` (not just Ctrl+C in tmux — the Shutdown y/[n]? prompt may still be waiting).<br>**Step 2:** ASK THE USER to confirm the server is dead (`curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5601/api/status` should return `000`, not `403`).<br>**Step 3:** Delete both databases: `rm -f /path/to/repo/.jupyter_ystore.db` and `rm -f ~/.local/share/jupyter/file_id_manager.db`.<br>**Step 4:** Restart server, ask user to open the affected notebook in JupyterLab browser (creates fresh Yjs room for MCP), then reconnect MCP.<br>See `docs/issues/jupyter-mcp.md` for full root cause. |
 
 ### Jupyter Infrastructure
 - Start JupyterLab from the repo `.venv` with `.venv/bin/jupyter lab --no-browser --port=5601 --ip=127.0.0.1 --IdentityProvider.token="$JUPYTER_TOKEN"`.
