@@ -6,6 +6,7 @@ import time
 import yaml
 import math
 import random
+import warnings
 import itertools
 from datetime import datetime, timezone
 import wandb
@@ -24,6 +25,9 @@ from sklearn.preprocessing import FunctionTransformer
 from sklearn import config_context
 from typing import Literal, Union, List, Dict, Tuple
 from src.constant import PROJECT_NAME
+
+# Suppress benign sklearn delayed warning in spawned workers
+warnings.filterwarnings("ignore", message=".*sklearn.utils.parallel.delayed.*")
 
 def store_json(data, filepath):
     with open(filepath, "w") as file:
@@ -570,7 +574,7 @@ def model_based_parse_parameters(
     # Build ColumnTransformer — handles column selection per transformer
     preprocessor = ColumnTransformer(
         transformers=[
-            ("shuffle", FunctionTransformer(lambda x: x, validate=True, feature_names_out="one-to-one"), ["shuffle"]),
+            ("shuffle", FunctionTransformer(validate=True, feature_names_out="one-to-one"), ["shuffle"]),
             ("log2", Log2Transformer(inline_replace=False), ["embedding_dimension"]),
             ("log10", Log10Transformer(inline_replace=True), ["l1_regularization", "l2_regularization"]),
         ],
@@ -592,9 +596,11 @@ def model_based_parse_parameters(
     ])
 
     # Pass Polars DataFrame so ColumnTransformer selects columns by name
-    with config_context(transform_output="pandas"):
-        train_features_pd = training_data.select(feature_names)
-        surrogate.fit(train_features_pd, train_target)
+    train_features_pandas = training_data.select(feature_names)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+        with config_context(transform_output="pandas"):
+            surrogate.fit(train_features_pandas, train_target)
 
     # Build full grid DataFrame
     full_grid = pl.DataFrame(
