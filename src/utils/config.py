@@ -636,6 +636,17 @@ def model_based_parse_parameters(
         pl.Series("ucb", mu_hat + beta * sigma_hat),
     ])
 
+    # Surprise rate: fraction of explored cells where |observed - μ̂| / σ̂ > 2
+    explored_with_preds = full_grid.filter(pl.col("explored")).filter(pl.col("explored_mu").is_not_null())
+    if len(explored_with_preds) > 0:
+        explored_mu_vector = explored_with_preds["explored_mu"].to_numpy()
+        predicted_mu_vector = explored_with_preds["mu_hat"].to_numpy()
+        predicted_sigma_vector = explored_with_preds["sigma_hat"].to_numpy()
+        residuals = np.abs(explored_mu_vector - predicted_mu_vector) / np.clip(predicted_sigma_vector, 1e-10, None)
+        surprise_rate = 100.0 * np.mean(residuals > 2.0)
+    else:
+        surprise_rate = 0.0
+
     # ESM
     mu_best_observed = aggregated["target"].max()
     best_ucb = full_grid["ucb"].max()
@@ -668,6 +679,7 @@ def model_based_parse_parameters(
     print(f"  Coverage@95:   {coverage[95]:.2f}%")
     print(f"  Coverage@99:   {coverage[99]:.2f}%")
     print(f"  Explored:      {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
+    print(f"  Surprise rate: {surprise_rate:.2f}%  (residual > 2σ)")
     print(f"  Best observed: {mu_best_observed:.6f}")
     print(f"  Best UCB:      μ̂={selected_candidate['mu_hat']:.6f}  σ̂={selected_candidate['sigma_hat']:.6f}  UCB={best_ucb:.6f}")
     print(f"{'='*55}")
@@ -689,10 +701,11 @@ def model_based_parse_parameters(
         "selected_predicted_sigma": selected_candidate.get("sigma_hat"),
         "selected_ucb": selected_candidate.get("ucb"),
         "esm": round(esm, 4) if esm else None,
-        "coverage@75": round(coverage[75], 2) if coverage[75] else None,
-        "coverage@90": round(coverage[90], 2) if coverage[90] else None,
-        "coverage@95": round(coverage[95], 2) if coverage[95] else None,
-        "coverage@99": round(coverage[99], 2) if coverage[99] else None,
+        "surprise_rate": round(surprise_rate, 2) if surprise_rate is not None else None,
+        "coverage@75": round(coverage[75], 2) if coverage[75] is not None else None,
+        "coverage@90": round(coverage[90], 2) if coverage[90] is not None else None,
+        "coverage@95": round(coverage[95], 2) if coverage[95] is not None else None,
+        "coverage@99": round(coverage[99], 2) if coverage[99] is not None else None,
     })
 
     return selected_config, decision_metadata
