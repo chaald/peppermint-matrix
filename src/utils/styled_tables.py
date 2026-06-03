@@ -41,7 +41,6 @@ TABLE_STYLE_DENSITY = [
     if d["selector"] not in ["tr:nth-child(even) td", "tr:nth-child(odd) td"]
 ]
 
-
 def format_value(
     value: float, 
     metric: str,
@@ -165,7 +164,10 @@ def data_preview_styled(
 
     preview = dataframe.copy().head(max_rows)
     if "date_axis" in preview.columns:
-        preview["date_axis"] = preview["date_axis"].dt.strftime("%Y-%m-%d")
+        try:
+            preview["date_axis"] = preview["date_axis"].dt.strftime("%Y-%m-%d")
+        except AttributeError:
+            pass
 
     if caption is None:
         total_rows = len(dataframe)
@@ -179,7 +181,7 @@ def data_preview_styled(
     return styler
 
 
-def _make_gradient(cmap_name: str, lightness: float = 0.20) -> Callable:
+def make_gradient(cmap_name: str, lightness: float = 0.20) -> Callable:
     """Factory returning a styler.apply-compatible function with pastel inline bg colors."""
     import matplotlib.pyplot as plt
     import numpy as np
@@ -237,6 +239,6 @@ def style_run_density(
     for cmap_name, col_names in colormap_pairs:
         cols = [c for c in col_names if c in dataframe.columns]
         if cols:
-            styler = styler.apply(_make_gradient(cmap_name), subset=cols)
+            styler = styler.apply(make_gradient(cmap_name), subset=cols)
 
     return styler
