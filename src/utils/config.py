@@ -655,7 +655,7 @@ def model_based_parse_parameters(
     # Coverage at multiple percentiles
     mu_hat_vector = full_grid["mu_hat"].to_numpy()
     coverage = {}
-    for p in [75, 90, 95, 99]:
+    for p in [75, 90, 95, 99, 99.9]:
         threshold = np.percentile(mu_hat_vector, p)
         top_cells = full_grid.filter(pl.col("mu_hat") >= threshold)
         coverage[p] = 100.0 * top_cells["explored"].sum() / len(top_cells) if len(top_cells) > 0 else 0.0
@@ -683,6 +683,7 @@ def model_based_parse_parameters(
     print(f"  Coverage@90:    {coverage[90]:.2f}%")
     print(f"  Coverage@95:    {coverage[95]:.2f}%")
     print(f"  Coverage@99:    {coverage[99]:.2f}%")
+    print(f"  Coverage@99.9:  {coverage[99.9]:.2f}%")
     print(f"  Explored:       {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
     print(f"  Surprise rate:  {surprise_rate:.2f}%  (residual > 2σ)")
     print(f"  Best observed:  {mu_best_observed:.6f}")
@@ -715,6 +716,7 @@ def model_based_parse_parameters(
         "coverage@90": round(coverage[90], 2) if coverage[90] is not None else None,
         "coverage@95": round(coverage[95], 2) if coverage[95] is not None else None,
         "coverage@99": round(coverage[99], 2) if coverage[99] is not None else None,
+        "coverage@99.9": round(coverage[99.9], 2) if coverage[99.9] is not None else None,
     })
 
     return selected_config, decision_metadata
