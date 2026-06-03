@@ -566,6 +566,8 @@ def model_based_parse_parameters(
 
         training_data = pl.concat([aggregated, virtual_samples_dataframe], how="diagonal")
         train_target = training_data["target"].to_numpy()
+
+        print(f"Injected {len(virtual_records)} virtual samples with target={virtual_target:.4f} to bias surrogate toward optimism.")
     else:
         aggregated = aggregated.drop_nulls(subset=["target"])
         train_target = aggregated["target"].to_numpy()
