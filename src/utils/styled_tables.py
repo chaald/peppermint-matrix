@@ -207,17 +207,47 @@ def make_gradient(cmap_name: str, lightness: float = 0.20) -> Callable:
     return _apply
 
 
-def style_run_density(
-    dataframe: pd.DataFrame,
-    caption: Optional[str] = None,
-    style: Optional[TableStyle] = None,
-    max_rows: int = 10,
-    ascending_columns: Optional[List[str]] = [],
-    descending_columns: Optional[List[str]] = [],
-) -> Styler:
-    styler = data_preview_styled(dataframe, caption=caption, style=style or TABLE_STYLE_DENSITY, max_rows=max_rows)
+def default_formatter(value):
+    if pd.isna(value):
+        return "-"
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and value == int(value):
+            return f"{int(value):,}"
+        if isinstance(value, float):
+            if abs(value) < 0.0001 and value != 0:
+                return f"{value:.2e}"
+            return f"{value:.5f}"
+        return f"{value:,}"
+    return str(value)
 
-    # Alternating rows via apply (same css specificity as gradients below)
+
+DEFAULT_OVERRIDES = [
+    {"selector": "td", "props": [("text-align", "left"), ("padding", "4px 8px")]},
+    {"selector": "th", "props": [("padding", "4px 8px")]},
+]
+
+
+def style_table_heatmap(
+    dataframe: pd.DataFrame,
+    axis: int = 1,
+    cmap_name: str = "RdYlGn",
+    lightness: float = 0.20,
+    caption: Optional[str] = None,
+    ascending_features: Optional[List[str]] = None,
+    descending_features: Optional[List[str]] = None,
+    highlighter: Optional[Callable] = None,
+    formatter: Callable = default_formatter,
+    na_rep: str = "-",
+    style_overrides: Optional[TableStyle] = None,
+) -> Styler:
+    styles = TABLE_STYLE_DENSITY + DEFAULT_OVERRIDES + (style_overrides or [])
+    styler = dataframe.style.set_table_styles(styles)
+
+    if caption:
+        styler = styler.set_caption(caption)
+
+    styler = styler.format(formatter, na_rep=na_rep)
+
     def _alt_rows(df: pd.DataFrame) -> pd.DataFrame:
         even = "background-color: #F8FAFC"
         odd = "background-color: #FFFFFF"
@@ -229,16 +259,24 @@ def style_run_density(
 
     styler = styler.apply(_alt_rows, axis=None)
 
-    # Gradient overlays — come AFTER alt-rows in the stylesheet so they win on overlapping cells
-    # ascending_columns: low = good → RdYlGn_r (reversed, green at bottom)
-    # descending_columns: high = good → RdYlGn (normal, green at top)
-    colormap_pairs = [
-        ("RdYlGn_r", ascending_columns),
-        ("RdYlGn", descending_columns),
-    ]
-    for cmap_name, col_names in colormap_pairs:
-        cols = [c for c in col_names if c in dataframe.columns]
-        if cols:
-            styler = styler.apply(make_gradient(cmap_name), subset=cols)
+    if highlighter:
+        styler = styler.map(highlighter)
+    elif axis in (0, "index"):
+        pairs = [
+            ("RdYlGn_r", ascending_features or []),
+            ("RdYlGn", descending_features or []),
+        ]
+        for cmap, features in pairs:
+            cols = [c for c in features if c in dataframe.columns]
+            if cols:
+                styler = styler.apply(make_gradient(cmap, lightness), axis=0, subset=cols)
+    elif axis in (1, "index") and (ascending_features or descending_features):
+        for feature in dataframe.index:
+            if feature in (descending_features or []):
+                styler = styler.apply(make_gradient(f"{cmap_name}_r", lightness), axis=1, subset=pd.IndexSlice[[feature], :])
+            else:
+                styler = styler.apply(make_gradient(cmap_name, lightness), axis=1, subset=pd.IndexSlice[[feature], :])
+    else:
+        styler = styler.apply(make_gradient(cmap_name, lightness), axis=1)
 
     return styler
