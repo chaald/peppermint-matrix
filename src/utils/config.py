@@ -668,20 +668,28 @@ def model_based_parse_parameters(
 
     explored_percentage = 100.0 * full_grid["explored"].sum() / len(full_grid)
 
+    # Best explored config (highest observed mean score)
+    best_explored = aggregated.sort("target", descending=True).to_dicts()[0]
+    best_explored_config = {c: best_explored[c] for c in feature_names}
+    best_explored_score = best_explored["target"]
+
     # Pick best config (argmax UCB across all cells, with random tie-breaking)
     candidates = full_grid.filter(pl.col("ucb") == best_ucb)
     selected_candidate = candidates.to_dicts()[random.randint(0, len(candidates) - 1)]
 
     print(f"{'='*55}")
-    print(f"  ESM:           {esm:.4f}%  ({nines} nines)")
-    print(f"  Coverage@75:   {coverage[75]:.2f}%")
-    print(f"  Coverage@90:   {coverage[90]:.2f}%")
-    print(f"  Coverage@95:   {coverage[95]:.2f}%")
-    print(f"  Coverage@99:   {coverage[99]:.2f}%")
-    print(f"  Explored:      {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
-    print(f"  Surprise rate: {surprise_rate:.2f}%  (residual > 2σ)")
-    print(f"  Best observed: {mu_best_observed:.6f}")
-    print(f"  Best UCB:      μ̂={selected_candidate['mu_hat']:.6f}  σ̂={selected_candidate['sigma_hat']:.6f}  UCB={best_ucb:.6f}")
+    print(f"  ESM:            {esm:.4f}%  ({nines} nines)")
+    print(f"  Coverage@75:    {coverage[75]:.2f}%")
+    print(f"  Coverage@90:    {coverage[90]:.2f}%")
+    print(f"  Coverage@95:    {coverage[95]:.2f}%")
+    print(f"  Coverage@99:    {coverage[99]:.2f}%")
+    print(f"  Explored:       {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
+    print(f"  Surprise rate:  {surprise_rate:.2f}%  (residual > 2σ)")
+    print(f"  Best observed:  {mu_best_observed:.6f}")
+    print(f"  Best UCB:       μ̂={selected_candidate['mu_hat']:.6f}  σ̂={selected_candidate['sigma_hat']:.6f}  UCB={best_ucb:.6f}")
+    print(f"  Is Explored:    {selected_candidate['explored']}")
+    print(f"  Selected #runs: {selected_candidate['nruns']}")
+    print(f"  Best explored:  {best_explored_score:.6f}  {best_explored_config}")
     print(f"{'='*55}")
 
     selected_config = random_config.copy()
@@ -700,6 +708,7 @@ def model_based_parse_parameters(
         "selected_predicted_mu": selected_candidate.get("mu_hat"),
         "selected_predicted_sigma": selected_candidate.get("sigma_hat"),
         "selected_ucb": selected_candidate.get("ucb"),
+        "best_explored_score": round(best_explored_score, 6) if best_explored_score else None,
         "esm": round(esm, 4) if esm else None,
         "surprise_rate": round(surprise_rate, 2) if surprise_rate is not None else None,
         "coverage@75": round(coverage[75], 2) if coverage[75] is not None else None,
