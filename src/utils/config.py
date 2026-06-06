@@ -765,11 +765,35 @@ def model_based_parse_parameters(
 def write_decision_log(decision_metadata: Dict, log_path: str) -> None:
     if not decision_metadata:
         return
-    write_header = not os.path.exists(log_path)
-    with open(log_path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(decision_metadata))
-        if write_header:
+
+    current_keys = list(decision_metadata)
+    file_exists = os.path.exists(log_path) and os.path.getsize(log_path) > 0
+
+    if not file_exists:
+        with open(log_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=current_keys, extrasaction='raise')
             writer.writeheader()
+            writer.writerow(decision_metadata)
+        return
+
+    with open(log_path, "r", newline="") as f:
+        existing_headers = csv.DictReader(f).fieldnames
+
+    if current_keys == existing_headers:
+        with open(log_path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=current_keys, extrasaction='raise')
+            writer.writerow(decision_metadata)
+        return
+
+    with open(log_path, "r", newline="") as f:
+        existing_rows = list(csv.DictReader(f))
+
+    merged_headers = list(dict.fromkeys(current_keys + existing_headers))
+    with open(log_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=merged_headers, extrasaction='raise')
+        writer.writeheader()
+        for row in existing_rows:
+            writer.writerow(row)
         writer.writerow(decision_metadata)
 
 
