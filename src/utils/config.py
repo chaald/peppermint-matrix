@@ -673,7 +673,7 @@ def model_based_parse_parameters(
     # Best explored config (highest observed mean score) and best individual run
     best_explored = aggregated.sort("target", descending=True).to_dicts()[0]
     best_explored_config = {c: best_explored[c] for c in feature_names}
-    best_explored_score = best_explored["target"]
+    best_explored_config_score = best_explored["target"]
     best_run = runs.sort("target", descending=True).to_dicts()[0]
     best_run_score = best_run["target"]
     best_run_config = {c: best_run[c] for c in feature_names}
@@ -682,21 +682,44 @@ def model_based_parse_parameters(
     candidates = full_grid.filter(pl.col("ucb") == best_ucb)
     selected_candidate = candidates.to_dicts()[random.randint(0, len(candidates) - 1)]
 
+    # Format selected config compactly
+    selected_items = [f"{c}={selected_candidate[c]}" for c in feature_names]
+    novelty_status = "untried" if not selected_candidate.get("explored") else f"revisit ({int(selected_candidate.get('nruns', 0))} prior)"
+
+    # Format best run and best explored configs
+    best_run_items = [f"{c}={best_run_config[c]}" for c in feature_names]
+    best_explored_items = [f"{c}={best_explored_config[c]}" for c in feature_names]
+
+    def format_config(items, indent=16):
+        line_prefix = " " * indent
+        parts = []
+        current_line = []
+        for item in items:
+            test_line = "  ".join(current_line + [item])
+            if len(line_prefix) + len(test_line) > 78:
+                parts.append("  ".join(current_line))
+                current_line = [item]
+            else:
+                current_line.append(item)
+        if current_line:
+            parts.append("  ".join(current_line))
+        return ("\n" + line_prefix).join(parts)
+
+    # Coverage compact line
+    coverage_message = "  ".join(f"{p}={coverage[p]:.1f}%" for p in [75, 90, 95, 99, 99.9])
+
+    # OOB score from the surrogate
+    oob = surrogate.named_steps["random_forest"].oob_score_
+
     print(f"{'='*55}")
-    print(f"  ESM:            {esm:.4f}%  ({nines} nines)")
-    print(f"  Coverage@75:    {coverage[75]:.2f}%")
-    print(f"  Coverage@90:    {coverage[90]:.2f}%")
-    print(f"  Coverage@95:    {coverage[95]:.2f}%")
-    print(f"  Coverage@99:    {coverage[99]:.2f}%")
-    print(f"  Coverage@99.9:  {coverage[99.9]:.2f}%")
-    print(f"  Explored:       {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
-    print(f"  Surprise rate:  {surprise_rate:.2f}%  (residual > 2σ)")
-    print(f"  Best observed:  {mu_best_observed:.6f}")
-    print(f"  Best UCB:       μ̂={selected_candidate['mu_hat']:.6f}  σ̂={selected_candidate['sigma_hat']:.6f}  UCB={best_ucb:.6f}")
-    print(f"  Is Explored:    {selected_candidate['explored']}")
-    print(f"  Selected #runs: {selected_candidate['nruns']}")
-    print(f"  Best explored:  {best_explored_score:.6f}  (config mean)  {best_explored_config}")
-    print(f"  Best run:       {best_run_score:.6f}  (individual run)  {best_run_config}")
+    print(f"  Selected:    {format_config(selected_items)}  ({novelty_status})")
+    print(f"  Best run:    {format_config(best_run_items)}")
+    print(f"  Best mean:   {format_config(best_explored_items)}")
+    print(f"  Explored:    {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
+    print(f"  Coverage:    {coverage_message}")
+    print(f"  ──")
+    print(f"  Model:       ESM {esm:.1f}%  ·  Surprise {surprise_rate:.1f}%  ·  OOB R² {oob:.4f}")
+    print(f"  UCB:         μ̂={selected_candidate['mu_hat']:.4f}  +  {beta:.1f}×σ̂={selected_candidate['sigma_hat']:.4f}  =  {best_ucb:.4f}")
     print(f"{'='*55}")
 
     selected_config = random_config.copy()
@@ -715,7 +738,7 @@ def model_based_parse_parameters(
         "selected_predicted_mu": selected_candidate.get("mu_hat"),
         "selected_predicted_sigma": selected_candidate.get("sigma_hat"),
         "selected_ucb": selected_candidate.get("ucb"),
-        "best_explored_score": round(best_explored_score, 6) if best_explored_score else None,
+        "best_explored_score": round(best_explored_config_score, 6) if best_explored_config_score else None,
         "best_run_score": round(best_run_score, 6) if best_run_score else None,
         "best_run_config": str(best_run_config),
         "esm": round(esm, 4) if esm else None,
