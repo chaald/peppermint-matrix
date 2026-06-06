@@ -248,6 +248,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_based_virtual_sample_count", type=int, default=None, help="Number of optimistic virtual samples to inject. Only for --method=model_based.")
     parser.add_argument("--model_based_virtual_lambda", type=float, default=None, help="Lambda multiplier for virtual sample target = max(best, mean + lambda * std). Only for --method=model_based.")
     parser.add_argument("--model_based_log_path", type=str, default=None, help="Path for the hyperparameter search decision log. Only for --method=model_based.")
+    parser.add_argument("--model_based_acquisition_random_seed", type=int, default=None, help="Random seed for the acquisition RF. Auto-generated if not set. Only for --method=model_based.")
 
     args = parser.parse_args()
     config, decision_metadata = compile_config(args)

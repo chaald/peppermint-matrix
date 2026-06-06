@@ -23,7 +23,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import FunctionTransformer
 from sklearn import config_context
-from typing import Literal, Union, List, Dict, Tuple
+from typing import Literal, Union, List, Dict, Tuple, Optional
 from src.constant import PROJECT_NAME
 
 # Suppress benign sklearn delayed warning in spawned workers
@@ -483,12 +483,14 @@ def model_based_parse_parameters(
     n_jobs: int = -1,
     max_samples: float = 0.1,
     min_samples_leaf: int = 3,
+    acquisition_random_seed: Optional[int] = None,
 ) -> Dict:
     """
     Resolve hyperparameters using a surrogate model with UCB acquisition.
     Falls back to random sampling when data is insufficient.
     """
-    start_time = datetime.now(timezone.utc)
+    if acquisition_random_seed is None:
+        acquisition_random_seed = int(np.random.randint(0, 2**31 - 1))
     fixed_parameters, free_categorical_parameters, free_random_parameters, categorical_dtypes = parse_parameter_categories(parameters_config)
 
     feature_names = list(free_categorical_parameters)
@@ -549,9 +551,10 @@ def model_based_parse_parameters(
         std_observed = aggregated["target"].std()
         virtual_target = max(best_observed, mean_observed + virtual_lambda * std_observed)
 
+        actual_virtual_samples = min(virtual_sample_count, len(all_combinations))
         selected_cells = random.sample(
             all_combinations,
-            min(virtual_sample_count, len(all_combinations)),
+            actual_virtual_samples,
         )
 
         virtual_records = [
@@ -567,8 +570,9 @@ def model_based_parse_parameters(
         training_data = pl.concat([aggregated, virtual_samples_dataframe], how="diagonal")
         train_target = training_data["target"].to_numpy()
 
-        print(f"Injected {len(virtual_records)} virtual samples with target={virtual_target:.4f} to bias surrogate toward optimism.")
+        print(f"Injected {actual_virtual_samples} virtual samples with target={virtual_target:.4f} to bias surrogate toward optimism.")
     else:
+        actual_virtual_samples = 0
         aggregated = aggregated.drop_nulls(subset=["target"])
         train_target = aggregated["target"].to_numpy()
         training_data = aggregated
@@ -593,7 +597,7 @@ def model_based_parse_parameters(
             min_samples_leaf=min_samples_leaf,
             oob_score=True,
             n_jobs=n_jobs,
-            random_state=42,
+            random_state=acquisition_random_seed,
         )),
     ])
 
@@ -729,7 +733,11 @@ def model_based_parse_parameters(
         selected_config[col] = categorical_dtypes[col](selected_candidate[col])
 
     # Append to decision log
+    n_training_configs = len(aggregated) + actual_virtual_samples
     decision_metadata = {
+        "acquisition_random_seed": acquisition_random_seed,
+        "actual_virtual_samples": actual_virtual_samples,
+        "n_training_configs": n_training_configs,
         "beta": beta,
         "virtual_sample_count": virtual_sample_count,
         "virtual_lambda": virtual_lambda,
