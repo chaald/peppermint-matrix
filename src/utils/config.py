@@ -686,11 +686,11 @@ def model_based_parse_parameters(
     selected_items = [f"{c}={selected_candidate[c]}" for c in feature_names]
     novelty_status = "untried" if not selected_candidate.get("explored") else f"revisit ({int(selected_candidate.get('nruns', 0))} prior)"
 
-    # Format best run and best explored configs
+    # Format best run and best explored configs with scores
     best_run_items = [f"{c}={best_run_config[c]}" for c in feature_names]
     best_explored_items = [f"{c}={best_explored_config[c]}" for c in feature_names]
 
-    def format_config(items, indent=16):
+    def format_config(items, indent=15):
         line_prefix = " " * indent
         parts = []
         current_line = []
@@ -713,8 +713,10 @@ def model_based_parse_parameters(
 
     print(f"{'='*55}")
     print(f"  Selected:    {format_config(selected_items)}  ({novelty_status})")
-    print(f"  Best run:    {format_config(best_run_items)}")
-    print(f"  Best mean:   {format_config(best_explored_items)}")
+    print(f"  Best run:    {best_run_score:.6f}")
+    print(f"               {format_config(best_run_items)}")
+    print(f"  Best config: {best_explored_config_score:.6f}")
+    print(f"               {format_config(best_explored_items)}")
     print(f"  Explored:    {explored_percentage:.2f}%  ({full_grid['explored'].sum():,} / {len(full_grid):,} cells)")
     print(f"  Coverage:    {coverage_message}")
     print(f"  ──")
