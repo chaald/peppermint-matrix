@@ -670,10 +670,13 @@ def model_based_parse_parameters(
 
     explored_percentage = 100.0 * full_grid["explored"].sum() / len(full_grid)
 
-    # Best explored config (highest observed mean score)
+    # Best explored config (highest observed mean score) and best individual run
     best_explored = aggregated.sort("target", descending=True).to_dicts()[0]
     best_explored_config = {c: best_explored[c] for c in feature_names}
     best_explored_score = best_explored["target"]
+    best_run = runs.sort("target", descending=True).to_dicts()[0]
+    best_run_score = best_run["target"]
+    best_run_config = {c: best_run[c] for c in feature_names}
 
     # Pick best config (argmax UCB across all cells, with random tie-breaking)
     candidates = full_grid.filter(pl.col("ucb") == best_ucb)
@@ -692,7 +695,8 @@ def model_based_parse_parameters(
     print(f"  Best UCB:       μ̂={selected_candidate['mu_hat']:.6f}  σ̂={selected_candidate['sigma_hat']:.6f}  UCB={best_ucb:.6f}")
     print(f"  Is Explored:    {selected_candidate['explored']}")
     print(f"  Selected #runs: {selected_candidate['nruns']}")
-    print(f"  Best explored:  {best_explored_score:.6f}  {best_explored_config}")
+    print(f"  Best explored:  {best_explored_score:.6f}  (config mean)  {best_explored_config}")
+    print(f"  Best run:       {best_run_score:.6f}  (individual run)  {best_run_config}")
     print(f"{'='*55}")
 
     selected_config = random_config.copy()
@@ -712,6 +716,8 @@ def model_based_parse_parameters(
         "selected_predicted_sigma": selected_candidate.get("sigma_hat"),
         "selected_ucb": selected_candidate.get("ucb"),
         "best_explored_score": round(best_explored_score, 6) if best_explored_score else None,
+        "best_run_score": round(best_run_score, 6) if best_run_score else None,
+        "best_run_config": str(best_run_config),
         "esm": round(esm, 4) if esm else None,
         "surprise_rate": round(surprise_rate, 2) if surprise_rate is not None else None,
         "coverage@75": round(coverage[75], 2) if coverage[75] is not None else None,
