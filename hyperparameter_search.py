@@ -9,6 +9,7 @@ import pprint
 import wandb
 import time
 
+from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor
 from typing import Dict
 from functools import partial
@@ -34,12 +35,16 @@ def start_agent(sweep_id: str | None = None, nruns: int = 1):
 def local_agent(args: argparse.Namespace, nruns: int = 1):
     for _ in range(nruns):
         run_config, decision_metadata = compile_config(args)
+        start_time = datetime.now()
         report = main(**run_config)
+        end_time = datetime.now()
         if decision_metadata:
             ordered_decision_metadata = {
                 "run_id": report["run_id"],
                 "run_name": report["run_name"],
                 "sweep_id": report["sweep_id"],
+                "start_time": start_time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "end_time": end_time.strftime("%Y-%m-%dT%H:%M:%S"),
             }
             ordered_decision_metadata.update(decision_metadata)
             log_path = run_config.get("log_path", "hyperparameter_search.log.csv")

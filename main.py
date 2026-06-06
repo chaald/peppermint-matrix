@@ -3,7 +3,6 @@ import os
 import warnings
 warnings.filterwarnings("ignore", message=".*np\\.object.*")
 
-import os
 
 import csv
 import sys
@@ -18,6 +17,7 @@ import pprint
 
 from wandb.integration.keras import WandbMetricsLogger
 
+from datetime import datetime
 from src.constant import PROJECT_NAME
 from src.utils import filter_vocabulary, load_yaml, store_yaml, load_config
 from src.utils.config import fetch_run_metadata, write_decision_log
@@ -252,13 +252,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
     config, decision_metadata = compile_config(args)
 
+    start_time = datetime.now()
     report = main(**config)
+    end_time = datetime.now()
 
     if decision_metadata:
         ordered_decision_metadata = {
             "run_id": report["run_id"],
             "run_name": report["run_name"],
             "sweep_id": report["sweep_id"],
+            "start_time": start_time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "end_time": end_time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
         ordered_decision_metadata.update(decision_metadata)
         log_path = config.get("log_path", "hyperparameter_search.log.csv")

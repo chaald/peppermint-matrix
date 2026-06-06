@@ -729,7 +729,14 @@ def model_based_parse_parameters(
         selected_config[col] = categorical_dtypes[col](selected_candidate[col])
 
     # Append to decision log
-    decision_metadata = {"start_time": start_time.strftime("%Y-%m-%dT%H:%M:%S")}
+    decision_metadata = {
+        "beta": beta,
+        "virtual_sample_count": virtual_sample_count,
+        "virtual_lambda": virtual_lambda,
+        "estimator_count": estimator_count,
+        "min_samples_leaf": min_samples_leaf,
+        "max_samples": max_samples,
+    }
     decision_metadata.update({params: value for params, value in selected_config.items()})
     decision_metadata.update({
         "selected_explored": selected_candidate.get("explored", False),
