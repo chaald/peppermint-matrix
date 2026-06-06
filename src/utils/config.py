@@ -739,7 +739,7 @@ def model_based_parse_parameters(
     }
     decision_metadata.update({params: value for params, value in selected_config.items()})
     decision_metadata.update({
-        "selected_explored": selected_candidate.get("explored", False),
+        "selected_explored": str(selected_candidate.get("explored", False)).lower(),
         "selected_nruns": selected_candidate.get("nruns"),
         "explored_percentage": round(explored_percentage, 2),
         "selected_observed_mu": selected_candidate.get("explored_mu"),
@@ -747,10 +747,10 @@ def model_based_parse_parameters(
         "selected_predicted_mu": selected_candidate.get("mu_hat"),
         "selected_predicted_sigma": selected_candidate.get("sigma_hat"),
         "selected_ucb": selected_candidate.get("ucb"),
-        "best_explored_score": round(best_explored_config_score, 6) if best_explored_config_score else None,
-        "best_run_score": round(best_run_score, 6) if best_run_score else None,
-        "best_run_config": str(best_run_config),
-        "esm": round(esm, 4) if esm else None,
+        "best_explored_score": round(best_explored_config_score, 6) if best_explored_config_score is not None else None,
+        "best_run_score": round(best_run_score, 6) if best_run_score is not None else None,
+        "best_run_config": json.dumps(best_run_config),
+        "esm": round(esm, 4) if esm is not None else None,
         "surprise_rate": round(surprise_rate, 2) if surprise_rate is not None else None,
         "coverage@75": round(coverage[75], 2) if coverage[75] is not None else None,
         "coverage@90": round(coverage[90], 2) if coverage[90] is not None else None,
