@@ -59,9 +59,9 @@ def main(**config):
     tf.random.set_seed(config["random_seed"])    
 
     # A. Load and preprocess data
-    train_user_interaction = load_data("dataset/yelp2018/train.txt")
+    train_user_interaction = load_data(f"dataset/{config['dataset']}/train.txt")
     train_features_meta = construct_features_meta(train_user_interaction)
-    test_user_interaction = load_data("dataset/yelp2018/test.txt")
+    test_user_interaction = load_data(f"dataset/{config['dataset']}/test.txt")
     test_features_meta = construct_features_meta(test_user_interaction)
 
     user_items = train_user_interaction.groupby("user_id")["item_id"].apply(set).to_dict()
@@ -242,12 +242,13 @@ if __name__ == "__main__":
     parser.add_argument("--store_model", action="store_true", default=False)
     parser.add_argument("--tracker", type=str, default=None, help="Tracking backend. Use 'disabled' to skip wandb entirely.")
     parser.add_argument("--summary_path", type=str, default=None, help="Path to the summary parquet file for surrogate training. Overrides configs/default.yaml.")
+    parser.add_argument("--log_path", type=str, default=None, help="Path for the hyperparameter search decision log. Overrides configs/default.yaml.")
+    parser.add_argument("--dataset", type=str, default=None, help="Dataset name (e.g., yelp2018, gowalla). Overrides configs/default.yaml.")
     parser.add_argument("--model_based_beta", type=float, default=None, help="Exploration weight for UCB formula. Overrides configs/default.yaml.")
     parser.add_argument("--model_based_target", type=str, default=None, help="Target metric key in parquet. Overrides configs/default.yaml.")
     parser.add_argument("--model_based_estimator_count", type=int, default=None, help="Number of trees in Random Forest surrogate. Overrides configs/default.yaml.")
     parser.add_argument("--model_based_virtual_sample_count", type=int, default=None, help="Number of optimistic virtual samples to inject. Only for --method=model_based.")
     parser.add_argument("--model_based_virtual_lambda", type=float, default=None, help="Lambda multiplier for virtual sample target = max(best, mean + lambda * std). Only for --method=model_based.")
-    parser.add_argument("--model_based_log_path", type=str, default=None, help="Path for the hyperparameter search decision log. Only for --method=model_based.")
     parser.add_argument("--model_based_acquisition_random_seed", type=int, default=None, help="Random seed for the acquisition RF. Auto-generated if not set. Only for --method=model_based.")
 
     args = parser.parse_args()

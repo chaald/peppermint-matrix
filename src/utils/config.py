@@ -477,7 +477,6 @@ def model_based_parse_parameters(
     target: str = "epoch/test_recall@20", 
     estimator_count: int = 1024, 
     summary_path: str = "wandb/summary.parquet", 
-    log_path: str = "hyperparameter_search.log.csv", 
     virtual_sample_count: int = 100, 
     virtual_lambda: float = 1.0,
     n_jobs: int = -1,

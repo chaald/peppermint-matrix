@@ -77,6 +77,7 @@ def adjust_run_config(api: wandb.Api, run_name: str) -> Tuple[str, bool, str]:
 
         # ── Add default-value adjustments here ──────────────────────
         run.config["tracker"] = "wandb"
+        run.config["dataset"] = "yelp2018"
         updated = True
         # ────────────────────────────────────────────────────────────
 
