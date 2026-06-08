@@ -682,15 +682,12 @@ def model_based_parse_parameters(
     best_run_score = best_run["target"]
     best_run_config = {c: best_run[c] for c in feature_names}
 
-    # Best explored predicted mean (highest mu_hat among explored cells)
-    best_explored_mu_hat = full_grid.filter(pl.col("explored"))["mu_hat"].max()
-
     # Pick best config (argmax UCB across all cells, with random tie-breaking)
     candidates = full_grid.filter(pl.col("ucb") == best_ucb)
     selected_candidate = candidates.to_dicts()[random.randint(0, len(candidates) - 1)]
 
-    # Exploration premium: how far is selected μ̂ above the best explored μ̂
-    exploration_premium = selected_candidate["mu_hat"] - best_explored_mu_hat
+    best_explored_mu_hat = full_grid.filter(pl.col("explored"))["mu_hat"].max()
+    exploration_premium = selected_candidate["mu_hat"] - (best_explored_mu_hat or selected_candidate["mu_hat"])
 
     # Format selected config compactly
     selected_items = [f"{c}={selected_candidate[c]}" for c in feature_names]
