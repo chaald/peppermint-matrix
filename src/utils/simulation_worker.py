@@ -122,6 +122,7 @@ def run_trajectory(
             history_record["surprise_rate"] = decision_metadata.get("surprise_rate")
             history_record["coverage_99_9"] = decision_metadata.get("coverage@99.9")
             history_record["best_run_score"] = decision_metadata.get("best_run_score")
+            history_record["exploration_premium"] = decision_metadata.get("exploration_premium")
         elif run_idx % probe_interval == 0:
             suppress_output = io.StringIO()
             with contextlib.redirect_stdout(suppress_output):
@@ -142,12 +143,14 @@ def run_trajectory(
             history_record["surprise_rate"] = probe_metadata.get("surprise_rate")
             history_record["coverage_99_9"] = probe_metadata.get("coverage@99.9")
             history_record["best_run_score"] = probe_metadata.get("best_run_score")
+            history_record["exploration_premium"] = probe_metadata.get("exploration_premium")
         else:
             history_record["esm"] = None
             history_record["coverage_75"] = None
             history_record["surprise_rate"] = None
             history_record["coverage_99_9"] = None
             history_record["best_run_score"] = None
+            history_record["exploration_premium"] = None
 
         history_records.append(history_record)
 

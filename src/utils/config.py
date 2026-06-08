@@ -682,9 +682,15 @@ def model_based_parse_parameters(
     best_run_score = best_run["target"]
     best_run_config = {c: best_run[c] for c in feature_names}
 
+    # Best explored predicted mean (highest mu_hat among explored cells)
+    best_explored_mu_hat = full_grid.filter(pl.col("explored"))["mu_hat"].max()
+
     # Pick best config (argmax UCB across all cells, with random tie-breaking)
     candidates = full_grid.filter(pl.col("ucb") == best_ucb)
     selected_candidate = candidates.to_dicts()[random.randint(0, len(candidates) - 1)]
+
+    # Exploration premium: how far is selected μ̂ above the best explored μ̂
+    exploration_premium = selected_candidate["mu_hat"] - best_explored_mu_hat
 
     # Format selected config compactly
     selected_items = [f"{c}={selected_candidate[c]}" for c in feature_names]
@@ -725,7 +731,7 @@ def model_based_parse_parameters(
     print(f"  Coverage:    {coverage_message}")
     print(f"  ──")
     print(f"  Model:       ESM {esm:.1f}%  ·  Surprise {surprise_rate:.1f}%  ·  OOB R² {oob:.4f}")
-    print(f"  UCB:         μ̂={selected_candidate['mu_hat']:.4f}  +  {beta:.1f}×σ̂={selected_candidate['sigma_hat']:.4f}  =  {best_ucb:.4f}")
+    print(f"  UCB:         μ̂={selected_candidate['mu_hat']:.4f}  +  {beta:.1f}×σ̂={selected_candidate['sigma_hat']:.4f}  =  {best_ucb:.4f}  (premium {exploration_premium:+.4f})")
     print(f"{'='*55}")
 
     selected_config = random_config.copy()
@@ -755,6 +761,7 @@ def model_based_parse_parameters(
         "selected_predicted_mu": selected_candidate.get("mu_hat"),
         "selected_predicted_sigma": selected_candidate.get("sigma_hat"),
         "selected_ucb": selected_candidate.get("ucb"),
+        "exploration_premium": round(exploration_premium, 6),
         "best_explored_score": round(best_explored_config_score, 6) if best_explored_config_score is not None else None,
         "best_run_score": round(best_run_score, 6) if best_run_score is not None else None,
         "best_run_config": json.dumps(best_run_config),
